@@ -54,14 +54,14 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     this.addCommand({
       id: "taskchute-insert-and-start",
       name: "TaskChute: Insert Task Line and Start",
-      icon: "play",
+      icon: "tc-hourglass",
       callback: () => this.insertAndStartTask(),
     });
 
     this.addCommand({
       id: "taskchute-start",
       name: "TaskChute: Start",
-      icon: "tc-hourglass", // ✅ カスタムを使う例（嫌なら "play" 等にしてOK）
+      icon: "play",
       callback: () => this.startTask(),
     });
 
@@ -112,12 +112,16 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       this.insertTaskLine();
     });
 
-    this.addRibbonIcon("play", "TaskChute: Insert Task Line and Start", () => {
+    this.addRibbonIcon("tc-hourglass", "TaskChute: Insert Task Line and Start", () => {
       this.insertTaskLineAndStartFromRibbon();
     });
 
     this.addRibbonIcon("square", "TaskChute: End", () => {
       this.endTask();
+    });
+
+    this.addRibbonIcon("skip-forward", "TaskChute: End and Start", () => {
+      this.endAndStartTask();
     });
   }
 

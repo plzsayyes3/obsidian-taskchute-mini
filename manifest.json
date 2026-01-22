@@ -1,7 +1,7 @@
 {
   "id": "obsidian-taskchute-min",
   "name": "TaskChute (min)",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "minAppVersion": "1.5.0",
   "description": "Open today's TaskChute file (minimal).",
   "author": "shuu",

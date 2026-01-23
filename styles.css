@@ -4,7 +4,7 @@
   display: none;
 }
 /* =========================
-   TaskChute Music Player Mode
+   TaskChute Music Player Mode (Light-friendly)
    ========================= */
 
 .taskchute-player {
@@ -14,79 +14,119 @@
   bottom: 12px;
   z-index: 9999;
 
-  padding: 10px 12px;
-  border-radius: 14px;
+  padding: 16px;
+  border-radius: 24px;
 
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-  box-shadow: 0 8px 24px rgba(0,0,0,.18);
+  background: color-mix(in srgb, var(--background-primary) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
 
-  /* iOS safe area */
-  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.18);
+
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
 }
 
-.taskchute-player.is-hidden {
-  display: none;
-}
+.taskchute-player.is-hidden { display: none; }
 
-/* ✅ Grid本体：あなたの確定案そのまま */
 .taskchute-player .tc-grid {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: 88px 1fr 60px 50px;
   grid-template-rows: auto auto auto;
-  gap: 10px;
-
+  gap: 12px;
   align-items: center;
 }
 
-/*
-   [ 入力モード]      (空)      (空)      [ ≡ ]
-[ ⏩ End&Start ]  [ ▶ Start ] [ ■ End ]   (空)
-  [ ◀︎ (上) ]         (空)      [ ▶ (下) ] (空)
-*/
-.taskchute-player .tc-input { grid-column: 1; grid-row: 1; }
-.taskchute-player .tc-menu  { grid-column: 4; grid-row: 1; }
+.taskchute-player .tc-input   { grid-column: 1; grid-row: 1; }
+.taskchute-player .tc-display { grid-column: 2; grid-row: 1; text-align: center; opacity: 0.7; font-size: 12px; }
+.taskchute-player .tc-menu    { grid-column: 4; grid-row: 1; justify-self: end; }
 
-.taskchute-player .tc-skip  { grid-column: 1; grid-row: 2; }
-.taskchute-player .tc-start { grid-column: 2; grid-row: 2; justify-self: center; }
-.taskchute-player .tc-end   { grid-column: 3; grid-row: 2; justify-self: end; }
+.taskchute-player .tc-skip    { grid-column: 1; grid-row: 2; }
+.taskchute-player .tc-start   { grid-column: 2; grid-row: 2; justify-self: center; }
+.taskchute-player .tc-end     { grid-column: 3; grid-row: 2; justify-self: end; }
 
-.taskchute-player .tc-focus { grid-column: 1; grid-row: 3; }
-.taskchute-player .tc-next  { grid-column: 3; grid-row: 3; justify-self: end; }
+.taskchute-player .tc-focus   { grid-column: 1; grid-row: 3; }
+.taskchute-player .tc-grip    { grid-column: 2; grid-row: 3; justify-self: center; opacity: 0.2; }
+.taskchute-player .tc-next    { grid-column: 3; grid-row: 3; justify-self: end; }
 
-/* Buttons */
 .taskchute-player .tc-btn {
   appearance: none;
-  border: 1px solid var(--background-modifier-border);
-  background: var(--interactive-normal);
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+  background: color-mix(in srgb, var(--interactive-normal) 80%, transparent);
   color: var(--text-normal);
 
-  border-radius: 999px;
-  padding: 10px 14px;
-  font-size: 14px;
-  line-height: 1;
+  border-radius: 12px;
+  padding: 10px;
+
+  font-size: 13px;
+  font-weight: 500;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  transition: transform 0.08s ease, background 0.12s ease, box-shadow 0.12s ease;
   white-space: nowrap;
 }
 
 .taskchute-player .tc-btn:active {
-  background: var(--interactive-hover);
+  background: color-mix(in srgb, var(--interactive-hover) 75%, transparent);
+  transform: scale(0.96);
 }
 
 .taskchute-player .tc-btn.tc-start {
-  padding: 14px 18px;
-  font-size: 16px;
-  font-weight: 600;
+  width: 72px;
+  height: 72px;
+  border-radius: 999px;
+
+  background: var(--text-normal);
+  color: var(--background-primary);
+
+  font-size: 28px;
+  font-weight: 700;
+  border: none;
+
+  box-shadow: 0 10px 24px rgba(0,0,0,0.12);
+}
+
+.taskchute-player .tc-btn.tc-skip {
+  font-size: 18px;
+  color: var(--text-accent);
+  border-color: color-mix(in srgb, var(--text-accent) 20%, transparent);
+}
+
+.taskchute-player .tc-btn.tc-end {
+  width: 48px;
+  height: 48px;
+  font-size: 18px;
+  color: color-mix(in srgb, var(--text-normal) 75%, red 25%);
+}
+
+.taskchute-player .tc-btn.tc-focus,
+.taskchute-player .tc-btn.tc-next {
+  width: 48px;
+  height: 44px;
+  font-size: 18px;
+  background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+}
+
+.taskchute-player .tc-btn.tc-input {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--interactive-normal) 92%, transparent);
 }
 
 .taskchute-player .tc-btn.tc-menu {
-  padding: 10px 12px;
-  font-size: 16px;
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  padding: 8px 10px;
 }
 
-.taskchute-player .tc-btn.tc-focus {
-  padding: 10px 12px;
-}
-
-.taskchute-player .tc-btn.tc-next {
-  padding: 10px 12px;
+.taskchute-player .tc-gripbar {
+  height: 4px;
+  width: 52px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-normal) 60%, transparent);
 }

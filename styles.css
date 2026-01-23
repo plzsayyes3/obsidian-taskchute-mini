@@ -1,0 +1,92 @@
+
+
+.taskchute-focus .cm-line.taskchute-focus-hide {
+  display: none;
+}
+/* =========================
+   TaskChute Music Player Mode
+   ========================= */
+
+.taskchute-player {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 9999;
+
+  padding: 10px 12px;
+  border-radius: 14px;
+
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  box-shadow: 0 8px 24px rgba(0,0,0,.18);
+
+  /* iOS safe area */
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+}
+
+.taskchute-player.is-hidden {
+  display: none;
+}
+
+/* ✅ Grid本体：あなたの確定案そのまま */
+.taskchute-player .tc-grid {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  grid-template-rows: auto auto auto;
+  gap: 10px;
+
+  align-items: center;
+}
+
+/*
+   [ 入力モード]      (空)      (空)      [ ≡ ]
+[ ⏩ End&Start ]  [ ▶ Start ] [ ■ End ]   (空)
+  [ ◀︎ (上) ]         (空)      [ ▶ (下) ] (空)
+*/
+.taskchute-player .tc-input { grid-column: 1; grid-row: 1; }
+.taskchute-player .tc-menu  { grid-column: 4; grid-row: 1; }
+
+.taskchute-player .tc-skip  { grid-column: 1; grid-row: 2; }
+.taskchute-player .tc-start { grid-column: 2; grid-row: 2; justify-self: center; }
+.taskchute-player .tc-end   { grid-column: 3; grid-row: 2; justify-self: end; }
+
+.taskchute-player .tc-focus { grid-column: 1; grid-row: 3; }
+.taskchute-player .tc-next  { grid-column: 3; grid-row: 3; justify-self: end; }
+
+/* Buttons */
+.taskchute-player .tc-btn {
+  appearance: none;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.taskchute-player .tc-btn:active {
+  background: var(--interactive-hover);
+}
+
+.taskchute-player .tc-btn.tc-start {
+  padding: 14px 18px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.taskchute-player .tc-btn.tc-menu {
+  padding: 10px 12px;
+  font-size: 16px;
+}
+
+.taskchute-player .tc-btn.tc-focus {
+  padding: 10px 12px;
+}
+
+.taskchute-player .tc-btn.tc-next {
+  padding: 10px 12px;
+}

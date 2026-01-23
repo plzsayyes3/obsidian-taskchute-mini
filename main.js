@@ -16,7 +16,11 @@
 // - さらにカスタムアイコン（tc-hourglass）を addIcon() で登録（任意）
 //   → Start に割り当て例を入れてある（必要なら他にも使える）
 
-const { Plugin, Notice, MarkdownView, addIcon } = require("obsidian");
+const { Plugin, Notice, MarkdownView, addIcon, Menu } = require("obsidian");
+
+// ✅ Focus Mode（CodeMirror6 行デコレーション用）
+const { ViewPlugin, Decoration } = require("@codemirror/view");
+const { RangeSetBuilder } = require("@codemirror/state");
 
 module.exports = class TaskChuteMinPlugin extends Plugin {
   async onload() {
@@ -35,6 +39,31 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     );
 
     // =================================================
+    // Player / Focus Mode state（手動トグル）
+    // =================================================
+        // Player Mode UI state
+    this.playerEl = null;
+    this.oneLineMode = false;
+
+    // Player Mode: 表示条件を監視（アクティブファイル / キーボード開閉）
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", () => this.updatePlayerVisibility())
+    );
+    this.registerEvent(
+      this.app.workspace.on("file-open", () => this.updatePlayerVisibility())
+    );
+
+    // iOS/Android キーボード推定：visualViewport の高さ変化を見る
+    if (window.visualViewport) {
+      this.registerDomEvent(window.visualViewport, "resize", () => this.updatePlayerVisibility());
+    }
+    this.registerDomEvent(window, "resize", () => this.updatePlayerVisibility());
+    this.focusMode = false;
+
+    // Focus Mode（表示のみ・本文非変更）
+    this.registerEditorExtension(this.buildFocusModeExtension());
+
+    // =================================================
     // Commands
     // =================================================
     this.addCommand({
@@ -43,6 +72,35 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       icon: "calendar",
       callback: () => this.openToday(),
     });
+
+    this.addCommand({
+      id: "taskchute-open-prev-day",
+      name: "TaskChute: Open Previous Day",
+      icon: "chevron-left",
+      callback: () => this.openPrevDay(),
+    });
+
+    this.addCommand({
+      id: "taskchute-open-next-day",
+      name: "TaskChute: Open Next Day",
+      icon: "chevron-right",
+      callback: () => this.openNextDay(),
+    });
+
+    this.addCommand({
+      id: "taskchute-toggle-player-mode",
+      name: "TaskChute: Toggle Player Mode",
+      icon: "keyboard",
+      callback: () => this.togglePlayerMode(),
+    });
+
+    this.addCommand({
+      id: "taskchute-toggle-focus-mode",
+      name: "TaskChute: Toggle Focus Mode",
+      icon: "eye",
+      callback: () => this.toggleFocusMode(),
+    });
+
 
     this.addCommand({
       id: "taskchute-insert-task-line",
@@ -102,10 +160,17 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     // =================================================
     // スマホ操作用：リボン
-    // Today / Insert / Insert+Start / End
     // =================================================
+    this.addRibbonIcon("chevron-left", "TaskChute: Open Previous Day", () => {
+      this.openPrevDay();
+    });
+
     this.addRibbonIcon("calendar", "TaskChute: Open Today", () => {
       this.openToday();
+    });
+
+    this.addRibbonIcon("chevron-right", "TaskChute: Open Next Day", () => {
+      this.openNextDay();
     });
 
     this.addRibbonIcon("plus", "TaskChute: Insert Task Line", () => {
@@ -125,7 +190,12 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     });
   }
 
-  onunload() {}
+
+  onunload() {
+    document.body.classList.remove("taskchute-focus");
+    this.destroyPlayerUI();
+  }
+
 
   // async をそのまま渡すと環境によって握りつぶされることがあるのでラップ
   insertTaskLineAndStartFromRibbon() {
@@ -133,12 +203,339 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   }
 
   // -------------------------
+  // Player Mode（手動トグル）
+  // -------------------------
+  togglePlayerMode() {
+    this.playerMode = !this.playerMode;
+
+    if (this.playerMode) {
+      this.ensurePlayerUI();
+    }
+
+    this.updatePlayerVisibility();
+    new Notice(this.playerMode ? "Player Mode: ON" : "Player Mode: OFF");
+  }
+
+    // =========================
+  // TaskChute Music Player Mode
+  // =========================
+
+  ensurePlayerUI() {
+    if (this.playerEl) return;
+
+    const el = document.createElement("div");
+    el.className = "taskchute-player is-hidden";
+    el.setAttribute("aria-label", "TaskChute Music Player Mode");
+
+    // ✅ grid
+    const grid = document.createElement("div");
+    grid.className = "tc-grid";
+
+    // [入力モード]（左上）
+    const btnInput = document.createElement("button");
+    btnInput.className = "tc-btn tc-input";
+    btnInput.textContent = "入力モード";
+    btnInput.addEventListener("click", () => this.enterInputMode());
+
+    // [≡]（右上）
+    const btnMenu = document.createElement("button");
+    btnMenu.className = "tc-btn tc-menu";
+    btnMenu.textContent = "≡";
+    btnMenu.addEventListener("click", (ev) => this.openPlayerMenu(ev));
+
+    // [⏩ End&Start]（中央段 左）
+    const btnSkip = document.createElement("button");
+    btnSkip.className = "tc-btn tc-skip";
+    btnSkip.textContent = "⏩ End&Start";
+    btnSkip.addEventListener("click", () => this.endAndStartTask());
+
+    // [▶ Start]（中央段 中央）
+    const btnStart = document.createElement("button");
+    btnStart.className = "tc-btn tc-start";
+    btnStart.textContent = "▶ Start";
+    btnStart.addEventListener("click", () => this.startTask());
+
+    // [■ End]（中央段 右）
+    const btnEnd = document.createElement("button");
+    btnEnd.className = "tc-btn tc-end";
+    btnEnd.textContent = "■ End";
+    btnEnd.addEventListener("click", () => this.endTask());
+
+    // [◀︎ (上)]（下段 左）＝ 1行上へ（カーソル移動）
+    const btnUp = document.createElement("button");
+    btnUp.className = "tc-btn tc-focus";
+    btnUp.textContent = "◀︎ (上)";
+    btnUp.addEventListener("click", () => this.moveCursorLine(-1));
+
+    // [▶ (下)]（下段 右）＝ 1行下へ（カーソル移動）
+    const btnDown = document.createElement("button");
+    btnDown.className = "tc-btn tc-next";
+    btnDown.textContent = "▶ (下)";
+    btnDown.addEventListener("click", () => this.moveCursorLine(1));
+
+    // append（grid配置はCSSで決まる）
+    grid.appendChild(btnInput);
+    grid.appendChild(btnMenu);
+    grid.appendChild(btnSkip);
+    grid.appendChild(btnStart);
+    grid.appendChild(btnEnd);
+    grid.appendChild(btnUp);
+    grid.appendChild(btnDown);
+
+    el.appendChild(grid);
+    document.body.appendChild(el);
+
+    this.playerEl = el;
+  }
+
+
+  destroyPlayerUI() {
+    if (!this.playerEl) return;
+    this.playerEl.remove();
+    this.playerEl = null;
+  }
+
+  updatePlayerVisibility() {
+    // Player Mode がONでなければ隠す（UIは残してOK）
+    if (!this.playerMode) {
+      if (this.playerEl) this.playerEl.classList.add("is-hidden");
+      return;
+    }
+
+    // UIがまだなければ作る
+    this.ensurePlayerUI();
+
+    const shouldShow =
+      this.isTaskchuteLogActive() &&
+      this.isKeyboardClosedLikely();
+
+    this.playerEl.classList.toggle("is-hidden", !shouldShow);
+  }
+
+  isTaskchuteLogActive() {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const path = view?.file?.path || "";
+    return /^taskchute\/\d{4}-\d{2}-\d{2}\.md$/.test(String(path));
+  }
+
+  // iOS/Androidの「キーボード閉」推定
+  // - visualViewport.height が小さくなる = キーボードが出てる可能性が高い
+  isKeyboardClosedLikely() {
+    // Desktop は常に「閉」とみなす（仕様：モバイル前提の条件）
+    // ただし、iPad等でも OK。
+    if (!this.app.isMobile) return true;
+
+    const vv = window.visualViewport;
+    if (!vv) return true; // 取れない環境は閉扱い（最小）
+
+    // しきい値：表示領域が 85% 未満ならキーボードが出てるとみなす
+    const ratio = vv.height / window.innerHeight;
+    return ratio >= 0.85;
+  }
+  // 入力モード：エディタにフォーカスしてキーボードを出す（モバイル）
+  enterInputMode() {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const editor = view?.editor;
+    if (!editor) return;
+  // Player Mode: カーソルを上下に移動（行単位）
+  // - delta = -1 で1行上 / +1 で1行下
+  // - 移動後、エディタにフォーカスしてスクロール追従
+  moveCursorLine(delta) {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const editor = view?.editor;
+    if (!editor) return;
+
+    const cur = editor.getCursor(); // { line, ch }
+    const lineCount = editor.lineCount?.() ?? null;
+
+    let nextLine = cur.line + delta;
+    if (nextLine < 0) nextLine = 0;
+    if (lineCount != null && nextLine > lineCount - 1) nextLine = lineCount - 1;
+
+    // 次の行の長さに合わせてchを丸める
+    const lineText = editor.getLine(nextLine) ?? "";
+    const nextCh = Math.min(cur.ch, lineText.length);
+
+    editor.setCursor({ line: nextLine, ch: nextCh });
+    editor.focus();
+
+    // 見える位置へ（Obsidian editor は scrollIntoView を持つ）
+    if (typeof editor.scrollIntoView === "function") {
+      editor.scrollIntoView({ from: { line: nextLine, ch: 0 }, to: { line: nextLine, ch: 0 } });
+    }
+  }
+
+    // 現在カーソルを維持してフォーカス
+    editor.focus();
+
+    // ついでに末尾に行きたいなら（不要なら削除OK）
+    // const cur = editor.getCursor();
+    // editor.setCursor(cur);
+  }
+
+  openPlayerMenu(ev) {
+    const menu = new Menu();
+    menu.addSeparator();
+
+    menu.addItem((item) =>
+      item
+        .setTitle(this.focusMode ? "Focus Mode: OFF" : "Focus Mode: ON")
+        .onClick(() => this.toggleFocusMode())
+    );
+
+    menu.addItem((item) =>
+      item.setTitle("Prev Day").onClick(() => this.openPrevDay())
+    );
+    menu.addItem((item) =>
+      item.setTitle("Next Day").onClick(() => this.openNextDay())
+    );
+    menu.addItem((item) =>
+      item.setTitle("Today").onClick(() => this.openToday())
+    );
+
+    menu.addSeparator();
+
+    menu.addItem((item) =>
+      item.setTitle("Insert Task").onClick(() => this.insertTaskLine())
+    );
+    menu.addItem((item) =>
+      item.setTitle("Insert & Start").onClick(() => this.insertAndStartTask())
+    );
+    menu.addItem((item) =>
+      item.setTitle("Resume").onClick(() => this.resumeTask())
+    );
+
+    menu.addSeparator();
+
+    menu.addItem((item) =>
+      item
+        .setTitle(this.oneLineMode ? "One-line mode: OFF" : "One-line mode: ON")
+        .onClick(() => {
+          this.oneLineMode = !this.oneLineMode;
+          new Notice(this.oneLineMode ? "One-line mode: ON" : "One-line mode: OFF");
+        })
+    );
+
+    // クリック位置に出す
+    menu.showAtMouseEvent(ev);
+  }
+
+  // -------------------------
+  // Focus Mode（OFF ⇄ ON）
+  // - 親行は残す
+  // - 子行は ⌛ のみ表示
+  // - 表示制御のみ（本文は書き換えない）
+  // -------------------------
+  toggleFocusMode() {
+    this.focusMode = !this.focusMode;
+
+    document.body.classList.toggle("taskchute-focus", this.focusMode);
+    this.refreshAllMarkdownEditors();
+
+    new Notice(this.focusMode ? "Focus Mode: ON" : "Focus Mode: OFF");
+  }
+
+  refreshAllMarkdownEditors() {
+    const leaves = this.app.workspace.getLeavesOfType("markdown");
+    for (const leaf of leaves) {
+      const cm = leaf.view?.editor?.cm;
+      if (cm && typeof cm.dispatch === "function") {
+        cm.dispatch({ effects: [] }); // no-op 再描画
+      }
+    }
+  }
+
+  buildFocusModeExtension() {
+    const plugin = this;
+
+    const hideLine = Decoration.line({
+      attributes: { class: "taskchute-focus-hide" },
+    });
+
+    function shouldHide(text) {
+      if (/^\s*$/.test(text)) return false;          // 空行
+      if (/^\s*#{1,6}\s+/.test(text)) return false; // 見出し
+      if (/^-\s+/.test(text)) return false;          // 親行
+      if (/^\s+-\s+/.test(text)) {
+        if (/^\s*-\s+⌛/.test(text)) return false;   // ⌛ は表示
+        return true;                                 // それ以外の子行は隠す
+      }
+      return false;
+    }
+
+    function build(view) {
+      if (!plugin.focusMode) return Decoration.none;
+
+      const b = new RangeSetBuilder();
+      const doc = view.state.doc;
+
+      for (const r of view.visibleRanges) {
+        let pos = r.from;
+        while (pos <= r.to) {
+          const line = doc.lineAt(pos);
+          if (shouldHide(line.text)) {
+            b.add(line.from, line.from, hideLine);
+          }
+          pos = line.to + 1;
+        }
+      }
+      return b.finish();
+    }
+
+    return ViewPlugin.fromClass(
+      class {
+        constructor(view) {
+          this.decorations = build(view);
+        }
+        update(update) {
+          if (update.docChanged || update.viewportChanged || update.transactions.length) {
+            this.decorations = build(update.view);
+          }
+        }
+      },
+      { decorations: v => v.decorations }
+    );
+  }
+
+  // -------------------------
   // Open Today
   // -------------------------
   async openToday() {
+    const dateStr = window.moment().format("YYYY-MM-DD");
+    await this.openTaskchuteByDate(dateStr);
+  }
+
+  // -------------------------
+  // Open Previous / Next Day
+  // - 基準は「今開いているtaskchuteログの日付」
+  // - 読めない場合は「今日」
+  // -------------------------
+  async openPrevDay() {
+    const base = this.getActiveTaskchuteDateOrToday();
+    const prev = window.moment(base, "YYYY-MM-DD").add(-1, "day").format("YYYY-MM-DD");
+    await this.openTaskchuteByDate(prev);
+  }
+
+  async openNextDay() {
+    const base = this.getActiveTaskchuteDateOrToday();
+    const next = window.moment(base, "YYYY-MM-DD").add(1, "day").format("YYYY-MM-DD");
+    await this.openTaskchuteByDate(next);
+  }
+
+  // 今開いている taskchute/YYYY-MM-DD.md から日付を読む。読めなければ今日。
+  getActiveTaskchuteDateOrToday() {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const path = view?.file?.path || "";
+    const m = String(path).match(/^taskchute\/(\d{4}-\d{2}-\d{2})\.md$/);
+    if (m) return m[1];
+    return window.moment().format("YYYY-MM-DD");
+  }
+
+  // 指定日付のログを開く（無ければ作成）
+  // ✅新規タブを増やさない：getLeaf(false)
+  async openTaskchuteByDate(dateStr) {
     const vault = this.app.vault;
     const folder = "taskchute";
-    const dateStr = window.moment().format("YYYY-MM-DD");
     const filePath = `${folder}/${dateStr}.md`;
 
     const folderAbstract = vault.getAbstractFileByPath(folder);
@@ -153,6 +550,11 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     await this.app.workspace.getLeaf(false).openFile(file);
   }
+
+  // -------------------------
+  // Insert Task Line（仕様：現在の ## セクション末尾に親行を追加）
+  // -------------------------
+
 
   // -------------------------
   // Insert Task Line（仕様：現在の ## セクション末尾に親行を追加）

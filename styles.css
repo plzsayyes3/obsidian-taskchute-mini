@@ -1,29 +1,85 @@
 
+/* =========================
+   TaskChute: Focus on "Now" (CM6 decorations)
+   - tc-dim-line: dim all non-current lines
+   - tc-done-dim: dim done lines more
+   - tc-now-parent: emphasize current parent task
+   ========================= */
 
+/* 1) 非表示系（既存） */
 .taskchute-focus .cm-line.taskchute-focus-hide {
   display: none;
 }
-
-.cm-line.tc-dim-line {
-  opacity: 0.8;
-}
-
-.cm-line.tc-now-parent {
-  opacity: 1;
-  font-weight: 600;
-  background: color-mix(in srgb, var(--background-secondary) 60%, transparent);
-  border-left: 3px solid color-mix(in srgb, var(--text-accent) 35%, transparent);
-  padding-left: 6px;
-}
-
-.cm-line.tc-done-dim {
-  opacity: 0.72;
-  font-weight: 400;
-}
-
 .taskchute-filter .cm-line.taskchute-filter-hide {
   display: none;
 }
+
+/* 2) Dim（今以外を薄く）
+   - opacity で薄くすると読みやすさは落ちるので、まずは色で薄める
+   - うまくいかなければ opacity に切り替えてOK
+*/
+.cm-line.tc-dim-line {
+  color: color-mix(in srgb, var(--text-normal) 55%, var(--background-primary));
+}
+
+/* セクション見出し用の薄め */
+.cm-line.tc-dim-heading {
+  color: color-mix(in srgb, var(--text-normal) 75%, var(--background-primary));
+}
+
+/* =========================
+   TaskChute: Done line de-emphasis (✔️)
+   目的：
+   - ✔️が目に飛び込んでこない
+   - でも「ログとしては読める」
+   ========================= */
+
+/* ✔️行全体をかなり控えめに */
+.cm-line.tc-done-dim {
+  color: color-mix(
+    in srgb,
+    var(--text-muted) 85%,
+    var(--background-primary)
+  );
+  font-size: 0.9em;
+  letter-spacing: 0.02em;
+}
+
+/* ✔️だけをさらに弱める（記号の主張を下げる） */
+.cm-line.tc-done-dim::first-letter {
+  opacity: 0.6;
+}
+
+/* ✔️行は hover したときだけ少し戻す（安心感用） */
+.cm-line.tc-done-dim:hover {
+  color: color-mix(
+    in srgb,
+    var(--text-normal) 60%,
+    var(--background-primary)
+  );
+}
+
+/* 4) “今の親” を強調（左上が強い、太字＋背景）
+   - 背景は薄く、角丸、左右少しだけパディングで「パネルに止まる」感
+*/
+.cm-line.tc-now-parent {
+  color: var(--text-normal);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--background-secondary) 65%, transparent);
+  border-radius: 8px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+/* 5) “今の親” が dim の影響を受けないように（念のため上書き） */
+.cm-line.tc-now-parent.tc-dim-line {
+  color: var(--text-normal);
+}
+
+/* 6) もし dim の効きが弱い/強いならここだけ調整
+   - 55% → 45% にするともっと薄い
+   - done は 75% → 65% にすると少し濃い
+*/
 /* =========================
    TaskChute Music Player Mode (Light-friendly)
    ========================= */

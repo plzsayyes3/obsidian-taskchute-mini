@@ -707,7 +707,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
           const t = lines[i];
           if (/^\s+-\s+/.test(t) && !/^-/.test(t)) {
             hasChild = true;
-            if (/^\s+-\s+✔️/.test(t)) hasDone = true;
+            if (/^\s+-\s*✔️/.test(t)) hasDone = true;
           }
           i++;
         }
@@ -1144,9 +1144,12 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       return null;
     }
 
+    function isHeading(text) {
+      return /^\s*#{1,6}\s+/.test(text);
+    }
+
     function shouldDim(text) {
       if (/^\s*$/.test(text)) return false;
-      if (/^\s*#{1,6}\s+/.test(text)) return false;
       return true;
     }
 
@@ -1171,8 +1174,14 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
           if (allowDim) {
             const isNowParent = nowParentLineNo === line.number;
-            if (!isNowParent && shouldDim(line.text)) classes.push("tc-dim-line");
-            if (/^\s*-\s+✔️/.test(line.text)) classes.push("tc-done-dim");
+            if (!isNowParent && shouldDim(line.text)) {
+              if (isHeading(line.text)) {
+                classes.push("tc-dim-heading");
+              } else {
+                classes.push("tc-dim-line");
+              }
+            }
+            if (/^\s*-\s*✔️/.test(line.text)) classes.push("tc-done-dim");
             if (isNowParent) classes.push("tc-now-parent");
           }
 
@@ -1219,7 +1228,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     function hasDoneChild(doc, parentLineNo, boundaryLineNo) {
       for (let i = parentLineNo + 1; i < boundaryLineNo; i++) {
         const t = doc.line(i).text;
-        if (/^\s+-\s+✔️/.test(t)) return true;
+        if (/^\s+-\s*✔️/.test(t)) return true;
       }
       return false;
     }
@@ -1488,7 +1497,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     const endTime = window.moment().format("HH:mm");
     const minutes = this.diffMinutesHHMM(startTime, endTime);
 
-    const doneText = `  -✔️${startTime}–${endTime} +${minutes}m`;
+    const doneText = `  - ✔️ ${startTime}–${endTime} +${minutes}m`;
     editor.setLine(lineIndex, doneText);
     editor.setCursor({ line: lineIndex, ch: doneText.length });
   }
@@ -1569,7 +1578,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     const endTime = window.moment().format("HH:mm");
     const minutes = this.diffMinutesHHMM(startTime, endTime);
-    const doneText = `  -✔️${startTime}–${endTime} +${minutes}m`;
+    const doneText = `  - ✔️ ${startTime}–${endTime} +${minutes}m`;
 
     editor.setLine(lineIndex, doneText);
     editor.setCursor({ line: lineIndex, ch: doneText.length });
@@ -1598,7 +1607,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
       for (let j = i + 1; j < boundary; j++) {
         const c = editor.getLine(j);
-        if (/^\s+-\s+✔️/.test(c)) hasDone = true;
+        if (/^\s+-\s*✔️/.test(c)) hasDone = true;
         if (this.isHourglassLine(c) && !this.hasEndTimeOnHourglass(c)) hasUnfinishedHourglass = true;
         if (hasDone || hasUnfinishedHourglass) break;
       }
@@ -1773,7 +1782,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     const lineText = editor.getLine(lineIndex);
 
     // ① カーソル行が✔️なら、その行を対象
-    if (/^\s+-\s+✔️/.test(lineText)) {
+    if (/^\s+-\s*✔️/.test(lineText)) {
       const updated = this.recalcDoneLine(lineText);
       if (!updated) return void new Notice("✔️行から時刻を読めなかったよ");
       if (updated === lineText) return void new Notice("変更はないよ");
@@ -1802,7 +1811,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   }
 
   recalcDoneLine(doneLineText) {
-    const m = doneLineText.match(/^\s+-\s+✔️\s*(\d{2}:\d{2})\s*–\s*(\d{2}:\d{2})(.*)$/);
+    const m = doneLineText.match(/^\s+-\s*✔️\s*(\d{2}:\d{2})\s*–\s*(\d{2}:\d{2})(.*)$/);
     if (!m) return null;
 
     const start = m[1];
@@ -1904,7 +1913,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   findLatestDoneInFile(editor) {
     for (let i = editor.lineCount() - 1; i >= 0; i--) {
       const t = editor.getLine(i);
-      if (/^\s+-\s+✔️/.test(t)) {
+      if (/^\s+-\s*✔️/.test(t)) {
         return { lineIndex: i, text: t };
       }
     }
@@ -1912,12 +1921,12 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   }
 
   extractStartTimeFromDone(text) {
-    const m = text.match(/^\s+-\s+✔️\s*(\d{2}:\d{2})/);
+    const m = text.match(/^\s+-\s*✔️\s*(\d{2}:\d{2})/);
     return m ? m[1] : null;
   }
 
   extractEndTimeFromDone(text) {
-    const m = text.match(/^\s+-\s+✔️\s*\d{2}:\d{2}\s*–\s*(\d{2}:\d{2})/);
+    const m = text.match(/^\s+-\s*✔️\s*\d{2}:\d{2}\s*–\s*(\d{2}:\d{2})/);
     return m ? m[1] : null;
   }
 
@@ -2031,7 +2040,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     for (let i = parentLine + 1; i < boundary; i++) {
       const t = editor.getLine(i);
       if (/^\s*$/.test(t)) continue;
-      if (/^\s+-\s+✔️/.test(t)) last = { lineIndex: i, text: t };
+      if (/^\s+-\s*✔️/.test(t)) last = { lineIndex: i, text: t };
     }
 
     return last;

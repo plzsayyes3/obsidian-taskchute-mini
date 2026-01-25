@@ -1,0 +1,22 @@
+{
+  "logFolderPath": "09_taskchute",
+  "templateFolderPath": "09_taskchute/templates",
+  "dimMode": true,
+  "enableTemplates": false,
+  "enableFocusMode": false,
+  "enableFilterMode": false,
+  "enablePlayerMode": false,
+  "playerDefaultView": "player",
+  "playerMenuAction": "toggle_grid",
+  "playerGridBindings": [
+    "start",
+    "end",
+    "endAndStart",
+    "insertAndStart",
+    "openToday",
+    "openPrevDay",
+    "openNextDay",
+    "toggleFocus"
+  ],
+  "settingsVersion": 1
+}

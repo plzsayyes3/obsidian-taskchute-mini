@@ -113,6 +113,53 @@
   align-items: center;
 }
 
+.taskchute-player .tc-player-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.taskchute-player .tc-player-header-eta.is-alert {
+  color: var(--text-error);
+}
+
+.taskchute-player .tc-estimate-chips {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.taskchute-player .tc-chip {
+  min-height: 40px;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
+  background: color-mix(in srgb, var(--interactive-normal) 85%, transparent);
+  color: var(--text-normal);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.taskchute-player .tc-chip:active {
+  background: color-mix(in srgb, var(--interactive-hover) 75%, transparent);
+  transform: scale(0.98);
+}
+
+.taskchute-player .tc-chip.tc-chip-clear {
+  color: var(--text-muted);
+}
+
 .taskchute-player .tc-root {
   display: flex;
   flex-direction: column;
@@ -153,7 +200,25 @@
 }
 
 .taskchute-player .tc-input   { grid-column: 1; grid-row: 1; }
-.taskchute-player .tc-display { grid-column: 2; grid-row: 1; text-align: center; opacity: 0.7; font-size: 12px; }
+.taskchute-player .tc-display {
+  grid-column: 2;
+  grid-row: 1;
+  text-align: center;
+  opacity: 0.75;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.taskchute-player .tc-display-main {
+  font-weight: 600;
+}
+
+.taskchute-player .tc-display-sub {
+  font-size: 11px;
+  opacity: 0.8;
+}
 .taskchute-player .tc-menu    { grid-column: 3; grid-row: 1; justify-self: end; }
 
 .taskchute-player .tc-skip    { grid-column: 1; grid-row: 2; }
@@ -245,4 +310,101 @@
   width: 52px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--text-normal) 60%, transparent);
+}
+
+/* =========================
+   TaskChute Metadata Ghosting
+   ========================= */
+
+.cm-line .tcm-id-ghost {
+  display: none;
+}
+
+.cm-line .tcm-estimate-badge {
+  padding: 2px 8px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background-secondary) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+/* =========================
+   TaskChute Mobile Toolbar
+   ========================= */
+
+.taskchute-mobile-toolbar {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 9998;
+
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  padding: 10px;
+  border-radius: 18px;
+
+  background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  backdrop-filter: blur(12px);
+}
+
+.taskchute-mobile-toolbar.is-hidden { display: none; }
+
+.taskchute-mobile-toolbar .tc-mt-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.taskchute-mobile-toolbar .tc-mt-row3 {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.taskchute-mobile-toolbar .tc-mt-row3.is-collapsed {
+  grid-template-columns: 1fr;
+}
+
+.taskchute-mobile-toolbar .tc-mt-row3.is-collapsed .tc-mt-btn:not(.tc-mt-toggle) {
+  display: none;
+}
+
+.taskchute-mobile-toolbar .tc-mt-btn {
+  min-height: 44px;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+  background: color-mix(in srgb, var(--interactive-normal) 80%, transparent);
+  color: var(--text-normal);
+
+  border-radius: 12px;
+  padding: 6px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.taskchute-mobile-toolbar .tc-mt-btn:active {
+  background: color-mix(in srgb, var(--interactive-hover) 75%, transparent);
+  transform: scale(0.97);
+}
+
+.taskchute-mobile-toolbar .tc-mt-icon {
+  font-size: 14px;
+}
+
+.taskchute-mobile-toolbar .tc-mt-label {
+  font-size: 10px;
+  opacity: 0.9;
 }

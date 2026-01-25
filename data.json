@@ -5,7 +5,12 @@
   "enableTemplates": false,
   "enableFocusMode": false,
   "enableFilterMode": false,
-  "enablePlayerMode": false,
+  "enablePlayerMode": true,
+  "enableMobileToolbar": false,
+  "mobileToolbarRow1Enabled": true,
+  "mobileToolbarRow2Enabled": true,
+  "mobileToolbarRow3Enabled": true,
+  "mobileToolbarRow3Collapsed": true,
   "playerDefaultView": "player",
   "playerMenuAction": "toggle_grid",
   "playerGridBindings": [

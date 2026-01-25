@@ -95,14 +95,16 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     this.playerDisplayEl = null;
     this.nowPlayingTitleEl = null;
     this.nowPlayingSubEl = null;
-    this.playerHeaderEl = null;
-    this.playerHeaderMainEl = null;
-    this.playerHeaderEtaEl = null;
+    this.horizonHeaderEl = null;
+    this.horizonHeaderMainEl = null;
+    this.horizonHeaderEtaEl = null;
+    this.horizonHeaderNoteEl = null;
     this.playerView = "player";
     this.playerNowPlayingTimer = null;
-    this.playerHeaderTimerSec = null;
-    this.playerHeaderTimerMin = null;
-    this.playerHeaderLastEtaMinute = null;
+    this.horizonHeaderTimerSec = null;
+    this.horizonHeaderTimerMin = null;
+    this.horizonHeaderLastEtaMinute = null;
+    this.horizonHeaderSnapshot = null;
     this.mobileToolbarEl = null;
     this.mobileToolbarRow3Collapsed = this.settings.mobileToolbarRow3Collapsed;
     this.oneLineMode = false;
@@ -117,6 +119,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
         this.updateTaskchuteActiveFlag();
         this.updatePlayerVisibility();
         this.updateMobileToolbarVisibility();
+        this.updateHorizonHeaderVisibility();
         this.refreshAllMarkdownEditors();
       })
     );
@@ -125,6 +128,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
         this.updateTaskchuteActiveFlag();
         this.updatePlayerVisibility();
         this.updateMobileToolbarVisibility();
+        this.updateHorizonHeaderVisibility();
         this.refreshAllMarkdownEditors();
       })
     );
@@ -134,11 +138,13 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       this.registerDomEvent(window.visualViewport, "resize", () => {
         this.updatePlayerVisibility();
         this.updateMobileToolbarVisibility();
+        this.updateHorizonHeaderVisibility();
       });
     }
     this.registerDomEvent(window, "resize", () => {
       this.updatePlayerVisibility();
       this.updateMobileToolbarVisibility();
+      this.updateHorizonHeaderVisibility();
     });
 
     this.applyDisplaySettings();
@@ -152,6 +158,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     this.registerSuggestStyles();
     this.addSettingTab(new TaskChuteSettingTab(this.app, this));
+    this.ensureHorizonHeaderUI();
 
     // =================================================
     // Commands
@@ -322,9 +329,10 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   onunload() {
     document.body.classList.remove("taskchute-focus");
     this.stopPlayerNowPlayingTicker();
-    this.stopPlayerHeaderTimers();
+    this.stopHorizonHeaderTimers();
     this.destroyPlayerUI();
     this.destroyMobileToolbarUI();
+    this.destroyHorizonHeaderUI();
   }
 
   async loadSettings() {
@@ -841,6 +849,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       this.destroyMobileToolbarUI();
     }
     this.updateMobileToolbarVisibility();
+    this.updateHorizonHeaderVisibility();
     this.refreshAllMarkdownEditors();
   }
 
@@ -925,11 +934,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     this.playerDisplayEl = null;
     this.nowPlayingTitleEl = null;
     this.nowPlayingSubEl = null;
-    this.playerHeaderEl = null;
-    this.playerHeaderMainEl = null;
-    this.playerHeaderEtaEl = null;
     this.stopPlayerNowPlayingTicker();
-    this.stopPlayerHeaderTimers();
   }
 
   togglePlayerView() {
@@ -948,20 +953,6 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     const grid = document.createElement("div");
     grid.className = "tc-grid";
-
-    const header = document.createElement("div");
-    header.className = "tc-player-header";
-    const headerMain = document.createElement("span");
-    headerMain.className = "tc-player-header-main";
-    headerMain.textContent = "--:-- / --:-- ";
-    const headerEta = document.createElement("span");
-    headerEta.className = "tc-player-header-eta";
-    headerEta.textContent = "【--:--】";
-    header.appendChild(headerMain);
-    header.appendChild(headerEta);
-    this.playerHeaderEl = header;
-    this.playerHeaderMainEl = headerMain;
-    this.playerHeaderEtaEl = headerEta;
 
     const btnInput = document.createElement("button");
     btnInput.className = "tc-btn tc-input";
@@ -1039,17 +1030,14 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     btnClear.addEventListener("click", () => this.clearEstimateForRunningTask());
     chipWrap.appendChild(btnClear);
 
-    this.playerTopEl.appendChild(header);
     this.playerTopEl.appendChild(grid);
     this.playerTopEl.appendChild(chipWrap);
     this.updateNowPlaying();
     const shouldShow = this.playerMode && this.isTaskchuteLogActive() && this.isKeyboardClosedLikely();
     if (shouldShow) {
       this.startPlayerNowPlayingTicker();
-      this.startPlayerHeaderTimers();
     } else {
       this.stopPlayerNowPlayingTicker();
-      this.stopPlayerHeaderTimers();
     }
   }
 
@@ -1059,11 +1047,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     this.playerDisplayEl = null;
     this.nowPlayingTitleEl = null;
     this.nowPlayingSubEl = null;
-    this.playerHeaderEl = null;
-    this.playerHeaderMainEl = null;
-    this.playerHeaderEtaEl = null;
     this.stopPlayerNowPlayingTicker();
-    this.stopPlayerHeaderTimers();
 
     const wrap = document.createElement("div");
     wrap.className = "tc-grid-wrap";
@@ -1120,12 +1104,64 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     this.playerEl.classList.toggle("is-hidden", !shouldShow);
     if (shouldShow && this.playerDisplayEl) {
       this.startPlayerNowPlayingTicker();
-      if (this.playerHeaderMainEl) this.startPlayerHeaderTimers();
     } else {
       this.stopPlayerNowPlayingTicker();
-      this.stopPlayerHeaderTimers();
     }
     this.updateMobileToolbarVisibility();
+  }
+
+  // =========================
+  // Horizon Header (Top-fixed)
+  // =========================
+  ensureHorizonHeaderUI() {
+    if (this.horizonHeaderEl) return;
+    const el = document.createElement("div");
+    el.className = "taskchute-horizon-header is-hidden";
+
+    const left = document.createElement("span");
+    left.className = "tc-hz-left";
+    left.textContent = "⌛ --:-- / --:--";
+
+    const right = document.createElement("span");
+    right.className = "tc-hz-right";
+    right.textContent = "🏁 【--:--】";
+
+    const note = document.createElement("span");
+    note.className = "tc-hz-note";
+    note.textContent = "";
+
+    el.appendChild(left);
+    el.appendChild(right);
+    el.appendChild(note);
+
+    this.horizonHeaderEl = el;
+    this.horizonHeaderMainEl = left;
+    this.horizonHeaderEtaEl = right;
+    this.horizonHeaderNoteEl = note;
+
+    document.body.appendChild(el);
+  }
+
+  destroyHorizonHeaderUI() {
+    if (!this.horizonHeaderEl) return;
+    this.horizonHeaderEl.remove();
+    this.horizonHeaderEl = null;
+    this.horizonHeaderMainEl = null;
+    this.horizonHeaderEtaEl = null;
+    this.horizonHeaderNoteEl = null;
+    this.stopHorizonHeaderTimers();
+  }
+
+  updateHorizonHeaderVisibility() {
+    if (!this.horizonHeaderEl) return;
+    const shouldShow = this.isKeyboardClosedLikely();
+    this.horizonHeaderEl.classList.toggle("is-hidden", !shouldShow);
+    if (shouldShow) {
+      this.startHorizonHeaderTimers();
+    } else {
+      this.stopHorizonHeaderTimers();
+    }
+    this.updateHorizonHeaderDisplay(true);
   }
 
   updateTaskchuteActiveFlag() {
@@ -1156,54 +1192,75 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     this.nowPlayingTitleEl.textContent = `▶ ${info.titleText}`;
     this.nowPlayingSubEl.textContent = info.subText || "";
-    this.updatePlayerHeaderDisplay(true);
+    this.updateHorizonHeaderDisplay(true);
   }
 
-  updatePlayerHeaderDisplay(forceEta = false) {
-    if (!this.playerHeaderMainEl || !this.playerHeaderEtaEl) return;
+  updateHorizonHeaderDisplay(forceEta = false) {
+    if (!this.horizonHeaderMainEl || !this.horizonHeaderEtaEl || !this.horizonHeaderEl) return;
 
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     const editor = view?.editor;
     if (!this.isTaskchuteLogActive() || !editor) {
-      this.playerHeaderMainEl.textContent = "--:-- / --:-- ";
-      this.playerHeaderEtaEl.textContent = "【--:--】";
-      this.playerHeaderEtaEl.classList.remove("is-alert");
+      this.horizonHeaderEl.classList.add("is-inactive");
+      if (this.horizonHeaderSnapshot) {
+        this.horizonHeaderMainEl.textContent = this.horizonHeaderSnapshot.left;
+        this.horizonHeaderEtaEl.textContent = this.horizonHeaderSnapshot.right;
+      } else {
+        this.horizonHeaderMainEl.textContent = "⌛ --:-- / --:--";
+        this.horizonHeaderEtaEl.textContent = "🏁 【--:--】";
+      }
+      if (this.horizonHeaderNoteEl) this.horizonHeaderNoteEl.textContent = "Background";
       return;
     }
+
+    this.horizonHeaderEl.classList.remove("is-inactive");
+    if (this.horizonHeaderNoteEl) this.horizonHeaderNoteEl.textContent = "";
 
     const summary = this.getTaskEstimateSummary(editor);
-    if (!summary) {
-      this.playerHeaderMainEl.textContent = "--:-- / --:-- ";
-      this.playerHeaderEtaEl.textContent = "【--:--】";
-      this.playerHeaderEtaEl.classList.remove("is-alert");
-      return;
-    }
-
-    const currentRemainingSeconds = Math.max(0, summary.currentRemainingSeconds);
-    const estimateSeconds = Math.max(0, summary.currentEstimateSeconds);
-    this.playerHeaderMainEl.textContent = `${this.formatMMSS(currentRemainingSeconds)} / ${this.formatMMSS(
-      estimateSeconds
-    )} `;
+    const leftText =
+      summary && summary.hasRunning
+        ? `⌛ ${this.formatSignedMMSS(summary.currentRemainingSeconds)} / ${this.formatMMSS(
+            summary.currentEstimateSeconds
+          )}`
+        : "⌛ --:-- / --:--";
+    this.horizonHeaderMainEl.textContent = leftText;
 
     const now = window.moment();
     const minuteKey = now.format("YYYY-MM-DD HH:mm");
-    if (forceEta || this.playerHeaderLastEtaMinute !== minuteKey) {
-      const eta = now.clone().add(summary.totalRemainingSeconds, "seconds");
-      const etaText = eta.format("HH:mm");
-      const dayDiff = eta.clone().startOf("day").diff(now.clone().startOf("day"), "days");
-      this.playerHeaderEtaEl.textContent = `【${etaText}】`;
-      if (dayDiff > 0) {
-        this.playerHeaderEtaEl.classList.add("is-alert");
+    if (forceEta || this.horizonHeaderLastEtaMinute !== minuteKey) {
+      if (!summary) {
+        this.horizonHeaderEtaEl.textContent = "🏁 【--:--】";
+        this.horizonHeaderEtaEl.classList.remove("is-alert");
       } else {
-        this.playerHeaderEtaEl.classList.remove("is-alert");
+        const eta = now.clone().add(summary.totalRemainingSeconds, "seconds");
+        const etaText = eta.format("HH:mm");
+        const dayDiff = eta.clone().startOf("day").diff(now.clone().startOf("day"), "days");
+        this.horizonHeaderEtaEl.textContent = `🏁 【${etaText}】`;
+        if (dayDiff > 0) {
+          this.horizonHeaderEtaEl.classList.add("is-alert");
+        } else {
+          this.horizonHeaderEtaEl.classList.remove("is-alert");
+        }
       }
-      this.playerHeaderLastEtaMinute = minuteKey;
+      this.horizonHeaderLastEtaMinute = minuteKey;
     }
+
+    this.horizonHeaderSnapshot = {
+      left: this.horizonHeaderMainEl.textContent,
+      right: this.horizonHeaderEtaEl.textContent,
+    };
   }
 
   getTaskEstimateSummary(editor) {
     const nowInfo = this.findLatestUnfinishedHourglassInFile(editor);
-    if (!nowInfo) return null;
+    if (!nowInfo) {
+      return {
+        totalRemainingSeconds: this.sumUnfinishedEstimateSeconds(editor),
+        currentEstimateSeconds: 0,
+        currentRemainingSeconds: 0,
+        hasRunning: false,
+      };
+    }
 
     const parentLine = this.findParentLineIndex(editor, nowInfo.lineIndex);
     if (parentLine === null) return null;
@@ -1212,18 +1269,23 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     const estimateMin = this.extractEstimateMinutesFromParentLine(parentText) || 0;
     const startTime = this.extractStartTimeFromHourglass(nowInfo.text);
     const elapsedSeconds = startTime ? this.diffSecondsHHMMToNow(startTime) : 0;
+    const currentEstimateSeconds = estimateMin * 60;
+    const currentRemainingSeconds = currentEstimateSeconds - elapsedSeconds;
 
-    const totalEstimateMinutes = this.sumUnfinishedEstimates(editor);
-    const totalRemainingSeconds = Math.max(0, totalEstimateMinutes * 60 - elapsedSeconds);
+    const totalRemainingSeconds = this.sumUnfinishedEstimateSeconds(editor, {
+      runningParentLine: parentLine,
+      runningRemainingSeconds: Math.max(0, currentRemainingSeconds),
+    });
 
     return {
       totalRemainingSeconds,
-      currentEstimateSeconds: estimateMin * 60,
-      currentRemainingSeconds: Math.max(0, estimateMin * 60 - elapsedSeconds),
+      currentEstimateSeconds,
+      currentRemainingSeconds,
+      hasRunning: true,
     };
   }
 
-  sumUnfinishedEstimates(editor) {
+  sumUnfinishedEstimateSeconds(editor, runningInfo = null) {
     const lineCount = editor.lineCount();
     let total = 0;
     for (let i = 0; i < lineCount; i++) {
@@ -1242,8 +1304,12 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       }
 
       if (!hasDone || hasUnfinishedHourglass) {
-        const est = this.extractEstimateMinutesFromParentLine(t);
-        if (est) total += est;
+        if (runningInfo && runningInfo.runningParentLine === i) {
+          total += Math.max(0, runningInfo.runningRemainingSeconds);
+        } else {
+          const est = this.extractEstimateMinutesFromParentLine(t);
+          if (est) total += est * 60;
+        }
       }
       i = boundary - 1;
     }
@@ -1266,26 +1332,33 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
 
-  startPlayerHeaderTimers() {
-    if (this.playerHeaderTimerSec) return;
-    this.playerHeaderTimerSec = window.setInterval(() => {
-      this.updatePlayerHeaderDisplay(false);
+  formatSignedMMSS(totalSeconds) {
+    const negative = totalSeconds < 0;
+    const abs = Math.abs(totalSeconds);
+    const mmss = this.formatMMSS(abs);
+    return negative ? `-${mmss}` : mmss;
+  }
+
+  startHorizonHeaderTimers() {
+    if (this.horizonHeaderTimerSec) return;
+    this.horizonHeaderTimerSec = window.setInterval(() => {
+      this.updateHorizonHeaderDisplay(false);
     }, 1000);
-    if (!this.playerHeaderTimerMin) {
-      this.playerHeaderTimerMin = window.setInterval(() => {
-        this.updatePlayerHeaderDisplay(true);
+    if (!this.horizonHeaderTimerMin) {
+      this.horizonHeaderTimerMin = window.setInterval(() => {
+        this.updateHorizonHeaderDisplay(true);
       }, 60 * 1000);
     }
   }
 
-  stopPlayerHeaderTimers() {
-    if (this.playerHeaderTimerSec) {
-      window.clearInterval(this.playerHeaderTimerSec);
-      this.playerHeaderTimerSec = null;
+  stopHorizonHeaderTimers() {
+    if (this.horizonHeaderTimerSec) {
+      window.clearInterval(this.horizonHeaderTimerSec);
+      this.horizonHeaderTimerSec = null;
     }
-    if (this.playerHeaderTimerMin) {
-      window.clearInterval(this.playerHeaderTimerMin);
-      this.playerHeaderTimerMin = null;
+    if (this.horizonHeaderTimerMin) {
+      window.clearInterval(this.horizonHeaderTimerMin);
+      this.horizonHeaderTimerMin = null;
     }
   }
 

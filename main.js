@@ -50,6 +50,16 @@ const DEFAULT_SETTINGS = {
   mobileToolbarRow3Collapsed: true,
   playerDefaultView: "player",
   playerMenuAction: "toggle_grid",
+  playerPlacement: "embedded",
+  playerFloatingPos: null,
+  horizonFloatingPos: null,
+  playerScale: 100,
+  horizonScale: 100,
+  playerScaleMin: 70,
+  playerScaleMax: 140,
+  horizonScaleMin: 70,
+  horizonScaleMax: 140,
+  enableHorizonHeader: true,
   playerGridBindings: [
     "start",
     "end",
@@ -107,7 +117,6 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     this.horizonHeaderSnapshot = null;
     this.mobileToolbarEl = null;
     this.mobileToolbarRow3Collapsed = this.settings.mobileToolbarRow3Collapsed;
-    this.oneLineMode = false;
 
     this.focusMode = false;
     this.filterMode = false;
@@ -147,8 +156,8 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       this.updateHorizonHeaderVisibility();
     });
 
-    this.applyDisplaySettings();
     this.updateTaskchuteActiveFlag();
+    this.applyDisplaySettings();
     // Focus Mode + Dim（表示のみ・本文非変更）
     this.registerEditorExtension(this.buildFocusModeExtension());
     // Filter Mode（表示のみ・本文非変更）
@@ -203,6 +212,13 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       name: "TaskChute: Toggle Filter Mode",
       icon: "filter",
       callback: () => this.toggleFilterMode(),
+    });
+
+    this.addCommand({
+      id: "taskchute-toggle-horizon-header",
+      name: "TaskChute: Toggle Horizon Header",
+      icon: "clock",
+      callback: () => this.toggleHorizonHeader(),
     });
 
     this.addCommand({
@@ -363,6 +379,14 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       this.settings.enablePlayerMode = DEFAULT_SETTINGS.enablePlayerMode;
       changed = true;
     }
+    if (!this.settings.horizonFloatingPos || typeof this.settings.horizonFloatingPos !== "object") {
+      this.settings.horizonFloatingPos = DEFAULT_SETTINGS.horizonFloatingPos;
+      changed = true;
+    }
+    if (typeof this.settings.enableHorizonHeader !== "boolean") {
+      this.settings.enableHorizonHeader = DEFAULT_SETTINGS.enableHorizonHeader;
+      changed = true;
+    }
     if (typeof this.settings.enableMobileToolbar !== "boolean") {
       this.settings.enableMobileToolbar = DEFAULT_SETTINGS.enableMobileToolbar;
       changed = true;
@@ -413,6 +437,16 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
+  hasMoment() {
+    return typeof window !== "undefined" && typeof window.moment === "function";
+  }
+
+  ensureMoment() {
+    if (this.hasMoment()) return true;
+    new Notice("momentが利用できないよ");
+    return false;
+  }
+
   normalizeLogFolderPath(input) {
     const raw = String(input || "").trim();
     if (!raw) return null;
@@ -433,6 +467,23 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     return trimmed;
   }
 
+  normalizeScaleRange(minRaw, maxRaw) {
+    const fallbackMin = 70;
+    const fallbackMax = 140;
+    const clamp = (n) => Math.max(50, Math.min(200, n));
+    const minNum = Number(minRaw);
+    const maxNum = Number(maxRaw);
+    let min = Number.isFinite(minNum) ? Math.round(minNum) : fallbackMin;
+    let max = Number.isFinite(maxNum) ? Math.round(maxNum) : fallbackMax;
+    min = clamp(min);
+    max = clamp(max);
+    if (min >= max) {
+      min = fallbackMin;
+      max = fallbackMax;
+    }
+    return { min, max };
+  }
+
   ensureFolderExists(path) {
     const normalized = this.normalizeLogFolderPath(path);
     if (!normalized) return Promise.resolve();
@@ -443,10 +494,16 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     return parts.reduce((p, part) => {
       return p.then(async () => {
-        current = current ? `${current}/${part}` : part;
-        const existing = vault.getAbstractFileByPath(current);
-        if (!existing) {
-          await vault.createFolder(current);
+        try {
+          current = current ? `${current}/${part}` : part;
+          const existing = vault.getAbstractFileByPath(current);
+          if (!existing) {
+            await vault.createFolder(current);
+          }
+        } catch (err) {
+          console.error("[TaskChute] Failed to create folder:", current, err);
+          new Notice("フォルダ作成に失敗したよ");
+          throw err;
         }
       });
     }, Promise.resolve());
@@ -491,14 +548,36 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     const vault = this.app.vault;
     const folderAbstract = vault.getAbstractFileByPath(folder);
     if (!folderAbstract) return [];
+    if (!(folderAbstract instanceof TFolder)) {
+      new Notice("テンプレフォルダが見つからないよ");
+      return [];
+    }
 
     const files = vault
       .getFiles()
       .filter((f) => f.path.startsWith(folder + "/") && f.extension === "md");
 
     const result = [];
+    let warned = false;
+    let consecutiveFailures = 0;
     for (const file of files) {
-      const content = await vault.read(file);
+      let content = "";
+      try {
+        content = await vault.read(file);
+        consecutiveFailures = 0;
+      } catch (err) {
+        console.error("[TaskChute] Failed to read template:", file?.path, err);
+        if (!warned) {
+          new Notice("テンプレの読み込みに失敗したよ");
+          warned = true;
+        }
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 2) {
+          new Notice("テンプレ読み込みが連続で失敗したよ");
+          return [];
+        }
+        continue;
+      }
       const sections = this.extractTemplateSectionsAllLevels(content);
       result.push({ file, sections });
     }
@@ -556,11 +635,17 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       return;
     }
 
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    let view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view || !view.editor) return void new Notice("Markdownエディタを開いてね");
-    const editor = view.editor;
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+    const initialPath = view.file?.path || "";
+    let editor = view.editor;
 
     const templates = await this.getTemplateFiles();
+    view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view || !view.editor) return void new Notice("Markdownエディタが見つからなかったよ");
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+    if (view.file?.path !== initialPath) return void new Notice("別のファイルが開かれてるよ");
     const candidates = [];
     for (const tpl of templates) {
       const fileName = tpl.file.path.split("/").pop() || tpl.file.path;
@@ -589,20 +674,29 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       return;
     }
 
+    view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    editor = view?.editor;
+    if (!editor) return void new Notice("Markdownエディタが見つからなかったよ");
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
+    if (view?.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+    if (view?.file?.path !== initialPath) return void new Notice("別のファイルが開かれてるよ");
     const blockText = selected.map((s) => s.text.trimEnd()).join("\n\n");
     this.appendTextToEnd(editor, blockText);
   }
 
   // Phase 2-3: copy from previous day
   async copyFromPreviousDay() {
+    if (!this.ensureMoment()) return;
     if (!this.isTaskchuteLogActive()) {
       new Notice("taskchuteログを開いてね");
       return;
     }
 
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    let view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view || !view.editor) return void new Notice("Markdownエディタを開いてね");
-    const editor = view.editor;
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+    const initialPath = view.file?.path || "";
+    let editor = view.editor;
 
     const baseDate = this.getActiveTaskchuteDateOrToday();
     const prevDate = window.moment(baseDate, "YYYY-MM-DD").add(-1, "day").format("YYYY-MM-DD");
@@ -615,7 +709,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     const choice = await this.promptSingleMenu(
       [
-        { label: "All tasks (copy whole file body except H1)", value: "all" },
+        { label: "All tasks (parents only, except H1)", value: "all" },
         { label: "Unlogged tasks (no child OR no ✔️)", value: "unlogged" },
         { label: "Pick sections...", value: "sections" },
       ],
@@ -623,7 +717,19 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     );
     if (!choice) return;
 
-    const content = await this.app.vault.read(prevFile);
+    let content = "";
+    try {
+      content = await this.app.vault.read(prevFile);
+    } catch (err) {
+      console.error("[TaskChute] Failed to read previous log:", prevFile?.path, err);
+      new Notice("前日のログを読めなかったよ");
+      return;
+    }
+    view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    editor = view?.editor;
+    if (!editor) return void new Notice("Markdownエディタが見つからなかったよ");
+    if (view?.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+    if (view?.file?.path !== initialPath) return void new Notice("別のファイルが開かれてるよ");
 
     if (choice.value === "all") {
       const body = this.stripChildLines(this.stripH1(content));
@@ -632,6 +738,12 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
         return;
       }
       const block = `---\n${body.trimStart()}`;
+      view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      editor = view?.editor;
+      if (!editor) return void new Notice("Markdownエディタが見つからなかったよ");
+      if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
+      if (view?.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+      if (view?.file?.path !== initialPath) return void new Notice("別のファイルが開かれてるよ");
       this.appendTextToEnd(editor, block);
       if (this.focusMode || this.filterMode) {
         new Notice("Focus/Filter がONだと子行が非表示になるよ");
@@ -646,6 +758,12 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
         return;
       }
       const blockText = tasks.join("\n");
+      view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      editor = view?.editor;
+      if (!editor) return void new Notice("Markdownエディタが見つからなかったよ");
+      if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
+      if (view?.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+      if (view?.file?.path !== initialPath) return void new Notice("別のファイルが開かれてるよ");
       this.appendTextToEnd(editor, blockText);
       if (this.focusMode || this.filterMode) {
         new Notice("Focus/Filter がONだと子行が非表示になるよ");
@@ -674,6 +792,12 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       return;
     }
 
+    view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    editor = view?.editor;
+    if (!editor) return void new Notice("Markdownエディタが見つからなかったよ");
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
+    if (view?.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+    if (view?.file?.path !== initialPath) return void new Notice("別のファイルが開かれてるよ");
     const blockText = selected.map((s) => this.stripChildLines(s.text).trimEnd()).join("\n\n");
     this.appendTextToEnd(editor, blockText);
     if (this.focusMode || this.filterMode) {
@@ -743,6 +867,26 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   }
 
   appendTextToEnd(editor, blockText) {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view?.file || !this.isTaskchuteLogPath(view.file.path)) {
+      new Notice("taskchuteログを開いてね");
+      return;
+    }
+    if (!this.isTaskchuteLogActive()) {
+      new Notice("taskchuteログを開いてね");
+      return;
+    }
+    if (view?.editor && editor && view.editor !== editor) {
+      new Notice("別のエディタが開かれてるよ");
+      return;
+    }
+    if (editor && typeof editor.getSelection === "function") {
+      const sel = editor.getSelection();
+      if (sel && sel.length > 0) {
+        new Notice("選択中は挿入しないよ");
+        return;
+      }
+    }
     const lastLineIndex = Math.max(0, editor.lineCount() - 1);
     const lastLineText = editor.getLine(lastLineIndex) ?? "";
     const prefix = lastLineText.trim() === "" ? "\n" : "\n\n";
@@ -782,7 +926,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
         let hasChild = false;
         let hasDone = false;
 
-        while (i < lines.length && !/^-\s+/.test(lines[i]) && !/^#\s+/.test(lines[i])) {
+        while (i < lines.length && !/^-\s+/.test(lines[i]) && !/^#{1,6}\s+/.test(lines[i])) {
           const t = lines[i];
           if (/^\s+-\s+/.test(t) && !/^-/.test(t)) {
             hasChild = true;
@@ -810,7 +954,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // =================================================
   // Player Mode（手動トグル）
   // =================================================
-  togglePlayerMode() {
+  async togglePlayerMode() {
     this.playerMode = !this.playerMode;
     this.settings.enablePlayerMode = this.playerMode;
 
@@ -821,7 +965,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     this.updatePlayerVisibility();
 
     new Notice(this.playerMode ? "Player Mode: ON" : "Player Mode: OFF");
-    this.saveSettings();
+    await this.saveSettings();
   }
 
   applyDisplaySettings() {
@@ -902,6 +1046,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     const gripbar = document.createElement("div");
     gripbar.className = "tc-gripbar";
     grip.appendChild(gripbar);
+    this.setupFloatingDrag(grip, el, "player");
 
     const btnDown = document.createElement("button");
     btnDown.className = "tc-btn tc-next";
@@ -921,8 +1066,123 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     } else {
       this.renderPlayerTop();
     }
-    document.body.appendChild(el);
+    this.attachPlayerToActiveView(el);
     this.playerEl = el;
+  }
+
+  attachPlayerToActiveView(el) {
+    const target = el || this.playerEl;
+    if (!target) return;
+    const placement = this.settings.playerPlacement || "embedded";
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const host = placement === "floating" ? document.body : view?.contentEl;
+    if (!host) {
+      target.classList.add("is-hidden");
+      return;
+    }
+    target.classList.toggle("is-floating", placement === "floating");
+    target.classList.toggle("is-embedded", placement !== "floating");
+    this.applyPlayerScale(target);
+    if (placement === "floating") {
+      this.applyFloatingPosition(target, "player");
+    } else {
+      target.style.left = "";
+      target.style.top = "";
+      target.style.right = "";
+      target.style.bottom = "";
+      target.style.transform = "";
+    }
+    if (target.parentElement !== host) {
+      host.appendChild(target);
+    }
+  }
+
+  setupFloatingDrag(handleEl, targetEl, targetKey = "player") {
+    if (!handleEl || !targetEl) return;
+    const onPointerDown = (ev) => {
+      if (this.settings.playerPlacement !== "floating") return;
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+
+      const rect = targetEl.getBoundingClientRect();
+      const offsetX = ev.clientX - rect.left;
+      const offsetY = ev.clientY - rect.top;
+      const width = targetEl.offsetWidth || rect.width;
+      const height = targetEl.offsetHeight || rect.height;
+
+      const move = (e) => {
+        const margin = 8;
+        const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+        const maxTop = Math.max(margin, window.innerHeight - height - margin);
+        let left = e.clientX - offsetX;
+        let top = e.clientY - offsetY;
+        left = Math.min(Math.max(margin, left), maxLeft);
+        top = Math.min(Math.max(margin, top), maxTop);
+        targetEl.style.left = `${left}px`;
+        targetEl.style.top = `${top}px`;
+        targetEl.style.right = "auto";
+        targetEl.style.bottom = "auto";
+        targetEl.style.transform = "none";
+      };
+
+      const up = async () => {
+        targetEl.classList.remove("is-dragging");
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+        this.captureFloatingPosition(targetEl, targetKey);
+        await this.saveSettings();
+      };
+
+      targetEl.classList.add("is-dragging");
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up, { once: true });
+      if (handleEl.setPointerCapture) handleEl.setPointerCapture(ev.pointerId);
+    };
+
+    handleEl.addEventListener("pointerdown", onPointerDown);
+  }
+
+  applyPlayerScale(targetEl) {
+    const range = this.normalizeScaleRange(this.settings.playerScaleMin, this.settings.playerScaleMax);
+    const raw = Number(this.settings.playerScale);
+    const scale = Number.isFinite(raw) ? Math.min(range.max, Math.max(range.min, raw)) : 100;
+    targetEl.style.setProperty("--tc-player-scale", String(scale / 100));
+  }
+
+  captureFloatingPosition(targetEl, targetKey = "player") {
+    const rect = targetEl.getBoundingClientRect();
+    const left = Math.max(0, Math.round(rect.left));
+    const top = Math.max(0, Math.round(rect.top));
+    if (targetKey === "horizon") {
+      this.settings.horizonFloatingPos = { left, top };
+    } else {
+      this.settings.playerFloatingPos = { left, top };
+    }
+  }
+
+  applyFloatingPosition(targetEl, targetKey = "player") {
+    const pos = targetKey === "horizon" ? this.settings.horizonFloatingPos : this.settings.playerFloatingPos;
+    if (!pos || typeof pos.left !== "number" || typeof pos.top !== "number") return;
+    const rect = targetEl.getBoundingClientRect();
+    const width = targetEl.offsetWidth || rect.width;
+    const height = targetEl.offsetHeight || rect.height;
+    const margin = 8;
+    const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - height - margin);
+    const left = Math.min(Math.max(margin, pos.left), maxLeft);
+    const top = Math.min(Math.max(margin, pos.top), maxTop);
+    targetEl.style.left = `${left}px`;
+    targetEl.style.top = `${top}px`;
+    targetEl.style.right = "auto";
+    targetEl.style.bottom = "auto";
+    targetEl.style.transform = "none";
+  }
+
+  applyHorizonScale(targetEl) {
+    const range = this.normalizeScaleRange(this.settings.horizonScaleMin, this.settings.horizonScaleMax);
+    const raw = Number(this.settings.horizonScale);
+    const scale = Number.isFinite(raw) ? Math.min(range.max, Math.max(range.min, raw)) : 100;
+    targetEl.style.setProperty("--tc-horizon-scale", String(scale / 100));
   }
 
   destroyPlayerUI() {
@@ -1098,6 +1358,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     // UIがまだなければ作る
     this.ensurePlayerUI();
+    this.attachPlayerToActiveView();
     this.updateNowPlaying();
 
     const shouldShow = this.isTaskchuteLogActive() && this.isKeyboardClosedLikely();
@@ -1113,6 +1374,13 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // =========================
   // Horizon Header (Top-fixed)
   // =========================
+  async toggleHorizonHeader() {
+    this.settings.enableHorizonHeader = !this.settings.enableHorizonHeader;
+    this.updateHorizonHeaderVisibility();
+    await this.saveSettings();
+    new Notice(this.settings.enableHorizonHeader ? "Horizon Header: ON" : "Horizon Header: OFF");
+  }
+
   ensureHorizonHeaderUI() {
     if (this.horizonHeaderEl) return;
     const el = document.createElement("div");
@@ -1139,7 +1407,29 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     this.horizonHeaderEtaEl = right;
     this.horizonHeaderNoteEl = note;
 
-    document.body.appendChild(el);
+    this.attachHorizonHeaderToActiveView(el);
+    this.setupFloatingDrag(el, el, "horizon");
+  }
+
+  attachHorizonHeaderToActiveView(el) {
+    const target = el || this.horizonHeaderEl;
+    if (!target) return;
+    const placement = this.settings.playerPlacement || "embedded";
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const host = placement === "floating" ? document.body : view?.contentEl;
+    if (!host) {
+      target.classList.add("is-hidden");
+      return;
+    }
+    target.classList.toggle("is-floating", placement === "floating");
+    target.classList.toggle("is-embedded", placement !== "floating");
+    this.applyHorizonScale(target);
+    if (placement === "floating") {
+      this.applyFloatingPosition(target, "horizon");
+    }
+    if (target.parentElement !== host) {
+      host.appendChild(target);
+    }
   }
 
   destroyHorizonHeaderUI() {
@@ -1154,7 +1444,13 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
   updateHorizonHeaderVisibility() {
     if (!this.horizonHeaderEl) return;
-    const shouldShow = this.isKeyboardClosedLikely();
+    if (!this.settings.enableHorizonHeader) {
+      this.horizonHeaderEl.classList.add("is-hidden");
+      this.stopHorizonHeaderTimers();
+      return;
+    }
+    this.attachHorizonHeaderToActiveView();
+    const shouldShow = this.isTaskchuteLogActive() && this.isKeyboardClosedLikely();
     this.horizonHeaderEl.classList.toggle("is-hidden", !shouldShow);
     if (shouldShow) {
       this.startHorizonHeaderTimers();
@@ -1197,6 +1493,11 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
   updateHorizonHeaderDisplay(forceEta = false) {
     if (!this.horizonHeaderMainEl || !this.horizonHeaderEtaEl || !this.horizonHeaderEl) return;
+    if (!this.hasMoment()) {
+      this.horizonHeaderMainEl.textContent = "⌛ --:-- / --:--";
+      this.horizonHeaderEtaEl.textContent = "🏁 【--:--】";
+      return;
+    }
 
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     const editor = view?.editor;
@@ -1317,6 +1618,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   }
 
   diffSecondsHHMMToNow(startHHMM) {
+    if (!this.hasMoment()) return 0;
     const now = window.moment();
     const start = window.moment(startHHMM, "HH:mm", true);
     if (!start.isValid()) return 0;
@@ -1372,6 +1674,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     const parentText = editor.getLine(parentLine);
     const titleText = this.stripTaskMetaForNowPlaying(parentText);
     if (!titleText) return null;
+    if (!this.hasMoment()) return { titleText, subText: "" };
 
     const start = this.extractStartTimeFromHourglass(found.text);
     const est = this.extractEstimateMinutesFromParentLine(parentText);
@@ -1409,7 +1712,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     if (!this.app.isMobile) return true;
 
     const vv = window.visualViewport;
-    if (!vv) return true; // 取れない環境は閉扱い
+    if (!vv) return false; // 取れない環境は表示しない
 
     // 表示領域が 85% 未満ならキーボードが出てるとみなす
     const ratio = vv.height / window.innerHeight;
@@ -1537,20 +1840,22 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     return btn;
   }
 
-  toggleFocusFilterCombo() {
+  async toggleFocusFilterCombo() {
     const next = !(this.focusMode && this.filterMode);
     this.focusMode = next;
     this.filterMode = next;
     this.settings.enableFocusMode = next;
     this.settings.enableFilterMode = next;
     this.applyDisplaySettings();
-    this.saveSettings();
+    await this.saveSettings();
     new Notice(next ? "Focus+Filter: ON" : "Focus+Filter: OFF");
   }
 
   // 入力モード：エディタにフォーカスしてキーボードを出す（モバイル）
   enterInputMode() {
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (view?.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
     const editor = view?.editor;
     if (!editor) return;
     editor.focus();
@@ -1558,7 +1863,9 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
   // Player Mode: カーソルを上下に移動（行単位）
   moveCursorLine(delta) {
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (view?.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
     const editor = view?.editor;
     if (!editor) return;
 
@@ -1581,6 +1888,9 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   }
 
   openPlayerMenu(ev) {
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (view?.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
     const menu = new Menu();
     menu.addSeparator();
 
@@ -1608,24 +1918,13 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     menu.addItem((item) => item.setTitle("End at Estimate").onClick(() => this.endTaskAtEstimate()));
     menu.addItem((item) => item.setTitle("Time Punch…").onClick(() => this.timePunch()));
 
-    menu.addSeparator();
-
-    menu.addItem((item) =>
-      item
-        .setTitle(this.oneLineMode ? "One-line mode: OFF" : "One-line mode: ON")
-        .onClick(() => {
-          this.oneLineMode = !this.oneLineMode;
-          new Notice(this.oneLineMode ? "One-line mode: ON" : "One-line mode: OFF");
-        })
-    );
-
     menu.showAtMouseEvent(ev);
   }
 
   // =================================================
   // Focus Mode（OFF ⇄ ON）
   // =================================================
-  toggleFocusMode() {
+  async toggleFocusMode() {
     this.focusMode = !this.focusMode;
     this.settings.enableFocusMode = this.focusMode;
 
@@ -1633,13 +1932,13 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     this.refreshAllMarkdownEditors();
 
     new Notice(this.focusMode ? "Focus Mode: ON" : "Focus Mode: OFF");
-    this.saveSettings();
+    await this.saveSettings();
   }
 
   // =================================================
   // Filter Mode（未実行のみ）
   // =================================================
-  toggleFilterMode() {
+  async toggleFilterMode() {
     this.filterMode = !this.filterMode;
     this.settings.enableFilterMode = this.filterMode;
 
@@ -1647,7 +1946,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     this.refreshAllMarkdownEditors();
 
     new Notice(this.filterMode ? "Filter Mode: ON" : "Filter Mode: OFF");
-    this.saveSettings();
+    await this.saveSettings();
   }
 
   refreshAllMarkdownEditors() {
@@ -1657,6 +1956,10 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       const cm = editor?.cm; // CM6 EditorView が入ることがある
       if (cm && typeof cm.dispatch === "function") {
         cm.dispatch({ effects: [] }); // no-op（再描画のきっかけ）
+        continue;
+      }
+      if (editor && typeof editor.refresh === "function") {
+        editor.refresh();
       }
     }
   }
@@ -1912,23 +2215,29 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // Open Today / Prev / Next
   // =================================================
   async openToday() {
+    if (!this.ensureMoment()) return;
     const dateStr = window.moment().format("YYYY-MM-DD");
     await this.openTaskchuteByDate(dateStr);
   }
 
   async openPrevDay() {
+    if (!this.ensureMoment()) return;
     const base = this.getActiveTaskchuteDateOrToday();
+    if (!base) return;
     const prev = window.moment(base, "YYYY-MM-DD").add(-1, "day").format("YYYY-MM-DD");
     await this.openTaskchuteByDate(prev);
   }
 
   async openNextDay() {
+    if (!this.ensureMoment()) return;
     const base = this.getActiveTaskchuteDateOrToday();
+    if (!base) return;
     const next = window.moment(base, "YYYY-MM-DD").add(1, "day").format("YYYY-MM-DD");
     await this.openTaskchuteByDate(next);
   }
 
   getActiveTaskchuteDateOrToday() {
+    if (!this.hasMoment()) return "";
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     const path = view?.file?.path || "";
     const folder = this.settings.logFolderPath;
@@ -1938,26 +2247,51 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   }
 
   async openTaskchuteByDate(dateStr) {
-    const vault = this.app.vault;
-    const folder = this.settings.logFolderPath;
-    const filePath = `${folder}/${dateStr}.md`;
+    try {
+      const vault = this.app.vault;
+      const folder = this.settings.logFolderPath;
+      const filePath = `${folder}/${dateStr}.md`;
 
-    await this.ensureFolderExists(folder);
+      await this.ensureFolderExists(folder);
 
-    let file = vault.getAbstractFileByPath(filePath);
-    if (!file) {
-      file = await vault.create(filePath, `# TaskChute ${dateStr}\n\n`);
+      let file = vault.getAbstractFileByPath(filePath);
+      if (file && !(file instanceof TFile)) {
+        new Notice("同名のフォルダがあるよ");
+        return;
+      }
+      if (!file) {
+        file = await vault.create(filePath, `# TaskChute ${dateStr}\n\n`);
+      }
+      if (!(file instanceof TFile)) {
+        new Notice("ログファイルを開けなかったよ");
+        return;
+      }
+
+      await this.app.workspace.getLeaf(true).openFile(file);
+      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (!view || !view.editor) {
+        new Notice("Markdownエディタが見つからなかったよ");
+        return;
+      }
+      if (view.file?.path !== file.path) {
+        new Notice("別のファイルが開かれてるよ");
+        return;
+      }
+    } catch (err) {
+      console.error("[TaskChute] Failed to open log:", dateStr, err);
+      new Notice("ログを開けなかったよ");
     }
-
-    await this.app.workspace.getLeaf(false).openFile(file);
   }
 
   // =================================================
   // Insert Task Line（## セクション末尾）
   // =================================================
   insertTaskLine() {
+    if (!this.ensureMoment()) return;
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view) return void new Notice("Markdownエディタを開いてね");
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
 
     const editor = view.editor;
     if (!editor) return void new Notice("エディタが見つからなかったよ");
@@ -1984,8 +2318,10 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // Add Task（親の兄弟として時刻なしで追加）
   // =================================================
   addTaskSibling() {
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view) return void new Notice("Markdownエディタを開いてね");
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
 
     const editor = view.editor;
     if (!editor) return void new Notice("エディタが見つからなかったよ");
@@ -2018,8 +2354,11 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // Insert & Start
   // =================================================
   async insertAndStartTask() {
+    if (!this.ensureMoment()) return;
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view) return void new Notice("Markdownエディタを開いてね");
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
 
     const editor = view.editor;
     if (!editor) return void new Notice("エディタが見つからなかったよ");
@@ -2051,8 +2390,11 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // Start（上書きしない）
   // =================================================
   async startTask() {
+    if (!this.ensureMoment()) return;
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view) return void new Notice("Markdownエディタを開いてね");
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
 
     const editor = view.editor;
     if (!editor) return void new Notice("エディタが見つからなかったよ");
@@ -2065,7 +2407,13 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   }
 
   // 親行指定で Start する中核
-  async startTaskAtParentLine(editor, parentLine, timeStr = window.moment().format("HH:mm")) {
+  async startTaskAtParentLine(editor, parentLine, timeStr = null) {
+    if (!this.hasMoment()) return;
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view?.file || !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+    if (!view.editor || view.editor !== editor) return void new Notice("別のエディタが開かれてるよ");
+    if (!timeStr) timeStr = window.moment().format("HH:mm");
     let parentText = editor.getLine(parentLine);
 
     // tc:id は保険として静かに付与（フローには使わない）
@@ -2111,16 +2459,26 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // End（stateなし運用：同ファイルをスキャンして未完了⌛を終了）
   // =================================================
   async endTask() {
+    if (!this.ensureMoment()) return;
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const targetFile = await this.resolveFileForFallback();
     if (!targetFile) {
       new Notice("対象ログが見つからないよ");
       return;
     }
 
-    await this.app.workspace.getLeaf(false).openFile(targetFile);
+    try {
+      await this.app.workspace.getLeaf(true).openFile(targetFile);
+    } catch (err) {
+      console.error("[TaskChute] Failed to open log:", targetFile?.path, err);
+      return void new Notice("ログを開けなかったよ");
+    }
 
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view || !view.editor) return void new Notice("Markdownエディタが見つからなかったよ");
+    if (view.file?.path !== targetFile.path) return void new Notice("別のファイルが開かれてるよ");
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
 
     const editor = view.editor;
 
@@ -2153,16 +2511,26 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // End at Estimate（見積で締める）
   // =================================================
   async endTaskAtEstimate() {
+    if (!this.ensureMoment()) return;
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     let view = this.app.workspace.getActiveViewOfType(MarkdownView);
     let editor = view?.editor;
+    if (view?.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
 
     if (!this.isTaskchuteLogActive() || !editor) {
       const targetFile = await this.resolveFileForFallback();
       if (!targetFile) return void new Notice("対象ログが見つからないよ");
 
-      await this.app.workspace.getLeaf(false).openFile(targetFile);
+      try {
+        await this.app.workspace.getLeaf(true).openFile(targetFile);
+      } catch (err) {
+        console.error("[TaskChute] Failed to open log:", targetFile?.path, err);
+        return void new Notice("ログを開けなかったよ");
+      }
       view = this.app.workspace.getActiveViewOfType(MarkdownView);
       editor = view?.editor;
+      if (!editor) return void new Notice("Markdownエディタが見つからなかったよ");
+      if (view?.file?.path !== targetFile.path) return void new Notice("別のファイルが開かれてるよ");
     }
 
     if (!this.isTaskchuteLogActive() || !editor) {
@@ -2200,8 +2568,11 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // End and Start（同一ファイルのみ）
   // =================================================
   async endAndStartTask() {
+    if (!this.ensureMoment()) return;
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view) return void new Notice("Markdownエディタを開いてね");
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
 
     const editor = view.editor;
     if (!editor) return void new Notice("エディタが見つからなかったよ");
@@ -2263,6 +2634,12 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   }
 
   applyEndAtHourglassLine(editor, lineIndex, text) {
+    if (!this.hasMoment()) return { ok: false, reason: "momentが利用できないよ" };
+    if (!this.isTaskchuteLogActive()) return { ok: false, reason: "taskchuteログを開いてね" };
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view?.file || !this.isTaskchuteLogPath(view.file.path))
+      return { ok: false, reason: "taskchuteログを開いてね" };
+    if (!view.editor || view.editor !== editor) return { ok: false, reason: "別のエディタが開かれてるよ" };
     const startTime = this.extractStartTimeFromHourglass(text);
     if (!startTime) return { ok: false, reason: "開始時刻が無いよ（Startで入れてね）" };
 
@@ -2317,16 +2694,23 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // Resume（最新の✔️を⌛に戻す）
   // =================================================
   async resumeTask() {
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const targetFile = await this.resolveFileForFallback();
     if (!targetFile) {
       new Notice("対象ログが見つからないよ");
       return;
     }
 
-    await this.app.workspace.getLeaf(false).openFile(targetFile);
+    try {
+      await this.app.workspace.getLeaf(true).openFile(targetFile);
+    } catch (err) {
+      console.error("[TaskChute] Failed to open log:", targetFile?.path, err);
+      return void new Notice("ログを開けなかったよ");
+    }
 
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view || !view.editor) return void new Notice("Markdownエディタが見つからなかったよ");
+    if (view.file?.path !== targetFile.path) return void new Notice("別のファイルが開かれてるよ");
 
     const editor = view.editor;
 
@@ -2369,11 +2753,15 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // Time Punch（HHmm入力で ⌛ 開始 or ✔️ 終了）
   // =================================================
   async timePunch() {
+    if (!this.ensureMoment()) return;
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view) return void new Notice("Markdownエディタを開いてね");
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
 
     const editor = view.editor;
     if (!editor) return void new Notice("エディタが見つからなかったよ");
+    const initialPath = view.file?.path || "";
 
     const input = window.prompt("Time Punch (HHmm):");
     if (input == null) return;
@@ -2384,22 +2772,30 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       return;
     }
 
-    const cursorLine = editor.getCursor().line;
-    let parentLine = this.findParentLineIndex(editor, cursorLine);
+    const latestView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const latestEditor = latestView?.editor;
+    if (!latestEditor) return void new Notice("エディタが見つからなかったよ");
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
+    if (latestView?.file && !this.isTaskchuteLogPath(latestView.file.path))
+      return void new Notice("taskchuteログを開いてね");
+    if (latestView?.file?.path !== initialPath) return void new Notice("別のファイルが開かれてるよ");
+
+    const cursorLine = latestEditor.getCursor().line;
+    let parentLine = this.findParentLineIndex(latestEditor, cursorLine);
     if (parentLine === null) {
-      parentLine = this.findFirstTaskParentFromTop(editor);
+      parentLine = this.findFirstTaskParentFromTop(latestEditor);
     }
     if (parentLine === null) {
       new Notice("対象の親タスクが見つからないよ");
       return;
     }
 
-    const hourglass = this.findLatestUnfinishedHourglassChild(editor, parentLine);
+    const hourglass = this.findLatestUnfinishedHourglassChild(latestEditor, parentLine);
     if (!hourglass) {
       const childText = `  - ⌛ ${timeStr}–  `;
-      const insertPos = { line: parentLine, ch: editor.getLine(parentLine).length };
-      editor.replaceRange("\n" + childText, insertPos);
-      editor.setCursor({ line: parentLine + 1, ch: childText.length });
+      const insertPos = { line: parentLine, ch: latestEditor.getLine(parentLine).length };
+      latestEditor.replaceRange("\n" + childText, insertPos);
+      latestEditor.setCursor({ line: parentLine + 1, ch: childText.length });
       this.updateNowPlaying();
       return;
     }
@@ -2413,8 +2809,8 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     const minutes = this.diffMinutesHHMM(startTime, timeStr);
     const doneText = `  - ✔️ ${startTime}–${timeStr} +${minutes}m`;
-    editor.setLine(lineIndex, doneText);
-    editor.setCursor({ line: lineIndex, ch: doneText.length });
+    latestEditor.setLine(lineIndex, doneText);
+    latestEditor.setCursor({ line: lineIndex, ch: doneText.length });
     this.updateNowPlaying();
   }
 
@@ -2422,21 +2818,18 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // Start From Latest Done Time
   // =================================================
   async startTaskFromLatestDoneTime() {
+    if (!this.ensureMoment()) return;
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view) return void new Notice("Markdownエディタを開いてね");
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
 
     const editor = view.editor;
     if (!editor) return void new Notice("エディタが見つからなかったよ");
 
     const cursorLine = editor.getCursor().line;
-    const cursorText = editor.getLine(cursorLine);
-
-    let parentLine = null;
-    if (/^-\s+/.test(cursorText)) {
-      parentLine = cursorLine;
-    } else {
-      parentLine = this.findFirstTaskParentFromTop(editor);
-    }
+    let parentLine = this.findParentLineIndex(editor, cursorLine);
+    if (parentLine === null) parentLine = this.findFirstTaskParentFromTop(editor);
 
     if (parentLine === null) {
       new Notice("開始できるタスク行が見つからないよ");
@@ -2462,8 +2855,11 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // Recalculate Duration
   // =================================================
   async recalculateDurationFromActiveLine() {
+    if (!this.ensureMoment()) return;
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view) return void new Notice("Markdownエディタを開いてね");
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
 
     const editor = view.editor;
     if (!editor) return void new Notice("エディタが見つからなかったよ");
@@ -2523,8 +2919,10 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // Memo（タスク直下）
   // =================================================
   insertMemoLine() {
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view) return void new Notice("Markdownエディタを開いてね");
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
 
     const editor = view.editor;
     if (!editor) return void new Notice("エディタが見つからなかったよ");
@@ -2560,6 +2958,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // 対象ファイル決定（開いているtaskchuteログ優先、なければToday）
   // =================================================
   async resolveFileForFallback() {
+    if (!this.hasMoment()) return null;
     const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
     const activeFile = activeView?.file || null;
 
@@ -2567,19 +2966,33 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       return activeFile;
     }
 
-    const vault = this.app.vault;
-    const folder = this.settings.logFolderPath;
-    const dateStr = window.moment().format("YYYY-MM-DD");
-    const filePath = `${folder}/${dateStr}.md`;
+    try {
+      const vault = this.app.vault;
+      const folder = this.settings.logFolderPath;
+      const dateStr = window.moment().format("YYYY-MM-DD");
+      const filePath = `${folder}/${dateStr}.md`;
 
-    await this.ensureFolderExists(folder);
+      await this.ensureFolderExists(folder);
 
-    let file = vault.getAbstractFileByPath(filePath);
-    if (!file) {
-      file = await vault.create(filePath, `# TaskChute ${dateStr}\n\n`);
+      let file = vault.getAbstractFileByPath(filePath);
+      if (file && !(file instanceof TFile)) {
+        new Notice("同名のフォルダがあるよ");
+        return null;
+      }
+      if (!file) {
+        file = await vault.create(filePath, `# TaskChute ${dateStr}\n\n`);
+      }
+      if (!(file instanceof TFile)) {
+        new Notice("対象ログを開けなかったよ");
+        return null;
+      }
+
+      return file;
+    } catch (err) {
+      console.error("[TaskChute] Failed to resolve fallback log:", err);
+      new Notice("対象ログを開けなかったよ");
+      return null;
     }
-
-    return file;
   }
 
   isTaskchuteLogPath(path) {
@@ -2675,6 +3088,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   }
 
   addMinutesHHMM(startHHMM, minutes) {
+    if (!this.hasMoment()) return null;
     const base = window.moment(startHHMM, "HH:mm", true);
     if (!base.isValid()) return null;
     return base.add(minutes, "minutes").format("HH:mm");
@@ -2727,33 +3141,70 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // Estimate (text)
   // =================================================
   setEstimateMinutes() {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!view) return void new Notice("Markdownエディタを開いてね");
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
+    const baseView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (baseView?.file && !this.isTaskchuteLogPath(baseView.file.path))
+      return void new Notice("taskchuteログを開いてね");
+    const initialPath = baseView?.file?.path || "";
+    const resolveTarget = () => {
+      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      const editor = view?.editor;
+      if (!editor) {
+        new Notice("エディタが見つからなかったよ");
+        return null;
+      }
+      if (view?.file && !this.isTaskchuteLogPath(view.file.path)) {
+        new Notice("taskchuteログを開いてね");
+        return null;
+      }
+      if (view?.file?.path !== initialPath) {
+        new Notice("別のファイルが開かれてるよ");
+        return null;
+      }
+      if (!this.isTaskchuteLogActive()) {
+        new Notice("taskchuteログを開いてね");
+        return null;
+      }
+      const cursor = editor.getCursor();
+      let parentLine = this.findParentLineIndex(editor, cursor.line);
+      if (parentLine === null) parentLine = this.findFirstTaskParentFromTop(editor);
+      if (parentLine === null) {
+        new Notice("親行が見つからないよ");
+        return null;
+      }
+      return { editor, parentLine, cursor };
+    };
 
-    const editor = view.editor;
-    if (!editor) return void new Notice("エディタが見つからなかったよ");
-
-    const cursor = editor.getCursor();
-    let parentLine = this.findParentLineIndex(editor, cursor.line);
-    if (parentLine === null) parentLine = this.findFirstTaskParentFromTop(editor);
-    if (parentLine === null) return void new Notice("親行が見つからないよ");
+    if (!resolveTarget()) return;
 
     const menu = new Menu();
     const minutesList = [5, 10, 15, 20, 25, 30, 45, 60, 90, 120];
     minutesList.forEach((m) => {
       menu.addItem((item) =>
-        item.setTitle(`${m}m`).onClick(() => this.applyEstimateAtParent(editor, parentLine, m, cursor))
+        item.setTitle(`${m}m`).onClick(() => {
+          const target = resolveTarget();
+          if (!target) return;
+          this.applyEstimateAtParent(target.editor, target.parentLine, m, target.cursor);
+        })
       );
     });
     menu.addSeparator();
     menu.addItem((item) =>
-      item.setTitle("Clear estimate").onClick(() => this.clearEstimateAtParent(editor, parentLine, cursor))
+      item.setTitle("Clear estimate").onClick(() => {
+        const target = resolveTarget();
+        if (!target) return;
+        this.clearEstimateAtParent(target.editor, target.parentLine, target.cursor);
+      })
     );
     menu.addItem((item) => item.setTitle("Cancel").onClick(() => {}));
     menu.showAtPosition({ x: Math.round(window.innerWidth * 0.5), y: 120 });
   }
 
   applyEstimateAtParent(editor, parentLine, minutes, cursor) {
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (view?.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+    if (!view?.editor || view.editor !== editor) return void new Notice("別のエディタが開かれてるよ");
     const parentText = editor.getLine(parentLine);
     const updated = this.upsertEstimateOnParentLine(parentText, minutes);
     editor.setLine(parentLine, updated);
@@ -2763,6 +3214,10 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   }
 
   clearEstimateAtParent(editor, parentLine, cursor) {
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (view?.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+    if (!view?.editor || view.editor !== editor) return void new Notice("別のエディタが開かれてるよ");
     const parentText = editor.getLine(parentLine);
     const updated = this.clearEstimateOnParentLine(parentText);
     editor.setLine(parentLine, updated);
@@ -2775,6 +3230,8 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     const editor = view?.editor;
     if (!this.isTaskchuteLogActive() || !editor) return void new Notice("taskchuteログを開いてね");
+    if (view?.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+    if (view.editor !== editor) return void new Notice("別のエディタが開かれてるよ");
 
     const target = this.findLatestUnfinishedHourglassInFile(editor);
     if (!target) return void new Notice("実行中タスクが無いよ");
@@ -2794,6 +3251,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       return;
     }
 
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const updated = this.upsertEstimateOnParentLine(parentText, next);
     editor.setLine(parentLine, updated);
     this.updateNowPlaying();
@@ -2804,6 +3262,8 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     const editor = view?.editor;
     if (!this.isTaskchuteLogActive() || !editor) return void new Notice("taskchuteログを開いてね");
+    if (view?.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+    if (view.editor !== editor) return void new Notice("別のエディタが開かれてるよ");
 
     const target = this.findLatestUnfinishedHourglassInFile(editor);
     if (!target) return void new Notice("実行中タスクが無いよ");
@@ -2812,6 +3272,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     if (parentLine === null) return void new Notice("親タスクが見つからないよ");
 
     const parentText = editor.getLine(parentLine);
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const cleared = this.clearEstimateOnParentLine(parentText);
     editor.setLine(parentLine, cleared);
     this.updateNowPlaying();
@@ -2938,6 +3399,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   }
 
   diffMinutesHHMM(start, end) {
+    if (!this.hasMoment()) return 0;
     const s = window.moment(start, "HH:mm");
     const e = window.moment(end, "HH:mm");
     if (e.isBefore(s)) e.add(1, "day");
@@ -3338,6 +3800,122 @@ class TaskChuteSettingTab extends PluginSettingTab {
         });
       });
 
+    new Setting(containerEl)
+      .setName("Player placement")
+      .setDesc("表示位置を選びます（floating = 画面固定 / embedded = エディタ内）")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("embedded", "Embedded");
+        dropdown.addOption("floating", "Floating");
+        dropdown.setValue(this.plugin.settings.playerPlacement || "embedded");
+        dropdown.onChange(async (value) => {
+          this.plugin.settings.playerPlacement = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyDisplaySettings();
+        });
+      });
+
+    const playerRange = this.plugin.normalizeScaleRange(
+      this.plugin.settings.playerScaleMin,
+      this.plugin.settings.playerScaleMax
+    );
+
+    new Setting(containerEl)
+      .setName("Player size")
+      .setDesc("Player の大きさ（70–140%）")
+      .addSlider((slider) => {
+        slider.setLimits(playerRange.min, playerRange.max, 1);
+        slider.setValue(this.plugin.settings.playerScale || 100);
+        slider.setDynamicTooltip();
+        slider.onChange(async (value) => {
+          this.plugin.settings.playerScale = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyDisplaySettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Player size range")
+      .setDesc("min/max (50–200)")
+      .addText((text) => {
+        text.setPlaceholder("min");
+        text.setValue(String(playerRange.min));
+        text.onChange(async (value) => {
+          const range = this.plugin.normalizeScaleRange(value, this.plugin.settings.playerScaleMax);
+          this.plugin.settings.playerScaleMin = range.min;
+          this.plugin.settings.playerScaleMax = range.max;
+          const cur = Number(this.plugin.settings.playerScale) || 100;
+          this.plugin.settings.playerScale = Math.min(range.max, Math.max(range.min, cur));
+          await this.plugin.saveSettings();
+          this.plugin.applyDisplaySettings();
+          this.display();
+        });
+      })
+      .addText((text) => {
+        text.setPlaceholder("max");
+        text.setValue(String(playerRange.max));
+        text.onChange(async (value) => {
+          const range = this.plugin.normalizeScaleRange(this.plugin.settings.playerScaleMin, value);
+          this.plugin.settings.playerScaleMin = range.min;
+          this.plugin.settings.playerScaleMax = range.max;
+          const cur = Number(this.plugin.settings.playerScale) || 100;
+          this.plugin.settings.playerScale = Math.min(range.max, Math.max(range.min, cur));
+          await this.plugin.saveSettings();
+          this.plugin.applyDisplaySettings();
+          this.display();
+        });
+      });
+
+    const horizonRange = this.plugin.normalizeScaleRange(
+      this.plugin.settings.horizonScaleMin,
+      this.plugin.settings.horizonScaleMax
+    );
+
+    new Setting(containerEl)
+      .setName("Horizon size")
+      .setDesc("Horizon Header の大きさ（70–140%）")
+      .addSlider((slider) => {
+        slider.setLimits(horizonRange.min, horizonRange.max, 1);
+        slider.setValue(this.plugin.settings.horizonScale || 100);
+        slider.setDynamicTooltip();
+        slider.onChange(async (value) => {
+          this.plugin.settings.horizonScale = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyDisplaySettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Horizon size range")
+      .setDesc("min/max (50–200)")
+      .addText((text) => {
+        text.setPlaceholder("min");
+        text.setValue(String(horizonRange.min));
+        text.onChange(async (value) => {
+          const range = this.plugin.normalizeScaleRange(value, this.plugin.settings.horizonScaleMax);
+          this.plugin.settings.horizonScaleMin = range.min;
+          this.plugin.settings.horizonScaleMax = range.max;
+          const cur = Number(this.plugin.settings.horizonScale) || 100;
+          this.plugin.settings.horizonScale = Math.min(range.max, Math.max(range.min, cur));
+          await this.plugin.saveSettings();
+          this.plugin.applyDisplaySettings();
+          this.display();
+        });
+      })
+      .addText((text) => {
+        text.setPlaceholder("max");
+        text.setValue(String(horizonRange.max));
+        text.onChange(async (value) => {
+          const range = this.plugin.normalizeScaleRange(this.plugin.settings.horizonScaleMin, value);
+          this.plugin.settings.horizonScaleMin = range.min;
+          this.plugin.settings.horizonScaleMax = range.max;
+          const cur = Number(this.plugin.settings.horizonScale) || 100;
+          this.plugin.settings.horizonScale = Math.min(range.max, Math.max(range.min, cur));
+          await this.plugin.saveSettings();
+          this.plugin.applyDisplaySettings();
+          this.display();
+        });
+      });
+
     containerEl.createEl("h3", { text: "Player / Grid" });
 
     new Setting(containerEl)
@@ -3438,6 +4016,7 @@ class TaskChuteSettingTab extends PluginSettingTab {
     inputEl.value = normalized;
     new Notice(`Log folder set to: ${normalized}`);
     this.plugin.applyDisplaySettings();
+    this.plugin.updateTaskchuteActiveFlag();
     if (after) after();
   }
 
@@ -3457,6 +4036,7 @@ class TaskChuteSettingTab extends PluginSettingTab {
     } else {
       new Notice("Template folder cleared");
     }
+    this.plugin.updateTaskchuteActiveFlag();
     if (after) after();
   }
 }

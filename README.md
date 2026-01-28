@@ -63,6 +63,7 @@ See [USAGE.md](USAGE.md) for practical usage.
 - 見積（`(20m)` / `(20)`）の自然記法＋バッジ表示
 - Horizon Header（上部固定の残り/見積/ETA）
 - Player Mode（下部UI）＋Grid 切替
+- Player/Horizon の埋め込み・フローティング切替／ドラッグ移動／サイズ調整
 - モバイル多段ツールバー（タップ最短）
 - Focus / Filter / Dim 表示モード
 - テンプレ（フォルダ指定・セクション挿入・前日コピー）
@@ -74,6 +75,7 @@ See [USAGE.md](USAGE.md) for practical usage.
 - Log folder path（`logFolderPath`）
 - Template folder path（`templateFolderPath`）
 - Enable templates / Focus / Filter / Dim / Player / Mobile toolbar
+- Player placement / Player size / Horizon size / Size ranges
 - Player 表示（初期ビュー / ≡挙動 / Grid割当）
 
 ---

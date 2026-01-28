@@ -29,7 +29,19 @@
 // - Player Mode の見た目（.taskchute-player など）は styles.css に入れてください。
 //   main.js に CSS を混ぜると VS Code / Obsidian で構文エラーになります。
 
-const { Plugin, Notice, MarkdownView, addIcon, Menu, PluginSettingTab, Setting, TFolder, TFile } = require("obsidian");
+const {
+  Plugin,
+  Notice,
+  MarkdownView,
+  addIcon,
+  Menu,
+  Modal,
+  PluginSettingTab,
+  Setting,
+  TFolder,
+  TFile,
+  ItemView,
+} = require("obsidian");
 
 // Focus Mode（CodeMirror6 行デコレーション用）
 const { ViewPlugin, Decoration } = require("@codemirror/view");
@@ -44,6 +56,7 @@ const DEFAULT_SETTINGS = {
   enableFilterMode: false,
   enablePlayerMode: false,
   enableMobileToolbar: false,
+  dayRolloverHour: 0,
   mobileToolbarRow1Enabled: true,
   mobileToolbarRow2Enabled: true,
   mobileToolbarRow3Enabled: true,
@@ -70,8 +83,270 @@ const DEFAULT_SETTINGS = {
     "openNextDay",
     "toggleFocus",
   ],
+  activeSettingsTab: "general",
   settingsVersion: 1,
 };
+
+const COCKPIT_VIEW_TYPE = "taskchute-cockpit-view";
+
+class TaskChuteCockpitView extends ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.memoInputEl = null;
+    this.nextEl = null;
+    this.mustEl = null;
+    this.nowEl = null;
+    this.nowTimeEl = null;
+    this.scheduledEl = null;
+    this.headerTimeEl = null;
+    this.headerDateEl = null;
+    this.currentNowParentIndex = null;
+    this.currentFilePath = null;
+  }
+
+  getViewType() {
+    return COCKPIT_VIEW_TYPE;
+  }
+
+  getDisplayText() {
+    return "TaskChute Cockpit";
+  }
+
+  getIcon() {
+    return "layout-dashboard";
+  }
+
+  async onOpen() {
+    this.containerEl.empty();
+    this.containerEl.addClass("taskchute-cockpit-view");
+
+    const root = this.containerEl.createDiv({ cls: "tc-cockpit-root" });
+    const header = root.createDiv({ cls: "tc-cockpit-header" });
+    const top = root.createDiv({ cls: "tc-cockpit-top" });
+    const middle = root.createDiv({ cls: "tc-cockpit-middle" });
+    const bottom = root.createDiv({ cls: "tc-cockpit-bottom" });
+
+    const timeEl = header.createDiv({ cls: "tc-cockpit-time", text: "--:--" });
+    const dateEl = header.createDiv({ cls: "tc-cockpit-date", text: "--/--" });
+    this.headerTimeEl = timeEl;
+    this.headerDateEl = dateEl;
+
+    const nextBox = top.createDiv({ cls: "tc-cockpit-box" });
+    nextBox.createEl("div", { cls: "tc-cockpit-title", text: "NEXT" });
+    this.nextEl = nextBox.createDiv({ cls: "tc-cockpit-list" });
+
+    const mustBox = top.createDiv({ cls: "tc-cockpit-box" });
+    mustBox.createEl("div", { cls: "tc-cockpit-title", text: "MUST" });
+    this.mustEl = mustBox.createDiv({ cls: "tc-cockpit-list" });
+
+    const actionBar = middle.createDiv({ cls: "tc-cockpit-actions" });
+    const btnStart = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-start", text: "▶ Start" });
+    const btnEnd = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-end", text: "■ End" });
+    const btnEas = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-eas", text: "⏭ E&S" });
+    const btnTime = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-time", text: "⏱ Time" });
+
+    this.plugin.wireCockpitButton(btnStart, {
+      onClick: () => this.plugin.runCockpitActionOnToday(() => this.plugin.startTask()),
+      onLongPress: (ev) =>
+        this.plugin.openCockpitMenu(ev, [
+          { label: "Start", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.startTask()) },
+          {
+            label: "Start From Latest Done Time",
+            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.startTaskFromLatestDoneTime()),
+          },
+          { label: "Start At…", run: () => new Notice("未実装") },
+        ]),
+    });
+
+    this.plugin.wireCockpitButton(btnEnd, {
+      onClick: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endTask()),
+      onLongPress: (ev) =>
+        this.plugin.openCockpitMenu(ev, [
+          { label: "End", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endTask()) },
+          {
+            label: "End At Estimate",
+            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endTaskAtEstimate()),
+          },
+          { label: "Time Punch", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.timePunch()) },
+          { label: "Resume", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.resumeTask()) },
+          {
+            label: "Recalculate Duration",
+            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.recalculateDurationFromActiveLine()),
+          },
+        ]),
+    });
+
+    this.plugin.wireCockpitButton(btnEas, {
+      onClick: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endAndStartTask()),
+      onLongPress: (ev) =>
+        this.plugin.openCockpitMenu(ev, [
+          {
+            label: "End & Start",
+            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endAndStartTask()),
+          },
+          { label: "Resume", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.resumeTask()) },
+          {
+            label: "Recalculate Duration",
+            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.recalculateDurationFromActiveLine()),
+          },
+        ]),
+    });
+
+    this.plugin.wireCockpitButton(btnTime, {
+      onClick: () => this.plugin.runCockpitActionOnToday(() => this.plugin.timePunch()),
+      onLongPress: (ev) =>
+        this.plugin.openCockpitMenu(ev, [
+          { label: "Time Punch", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.timePunch()) },
+          { label: "Estimate Input", run: () => new Notice("未実装") },
+        ]),
+    });
+
+    const nowBox = middle.createDiv({ cls: "tc-cockpit-now" });
+    nowBox.createEl("div", { cls: "tc-cockpit-label", text: "NOW EXECUTING" });
+    this.nowEl = nowBox.createDiv({ cls: "tc-cockpit-now-task", text: "READY" });
+    nowBox.createDiv({ cls: "tc-cockpit-horizon" });
+    this.nowTimeEl = nowBox.createDiv({ cls: "tc-cockpit-now-time", text: "" });
+    this.nowEl.addEventListener("click", () => {
+      this.plugin.cockpitJumpToNow(this.currentFilePath, this.currentNowParentIndex);
+    });
+
+    const memoWrap = middle.createDiv({ cls: "tc-cockpit-memo" });
+    this.memoInputEl = memoWrap.createEl("textarea", {
+      cls: "tc-cockpit-memo-input",
+      attr: { placeholder: "ひとことメモ" },
+    });
+    this.memoInputEl.addEventListener("keydown", async (ev) => {
+      if (ev.key === "Escape") {
+        this.memoInputEl.value = "";
+        ev.preventDefault();
+        return;
+      }
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        const text = this.memoInputEl.value.trim();
+        if (!text) return;
+        const ok = await this.plugin.cockpitAddMemo(
+          this.currentFilePath,
+          this.currentNowParentIndex,
+          text
+        );
+        if (ok) this.memoInputEl.value = "";
+      }
+    });
+
+    const schedBox = bottom.createDiv({ cls: "tc-cockpit-box" });
+    schedBox.createEl("div", { cls: "tc-cockpit-title", text: "SCHEDULED" });
+    this.scheduledEl = schedBox.createDiv({ cls: "tc-cockpit-list tc-cockpit-list-scroll" });
+
+    await this.render();
+  }
+
+  async render() {
+    const data = await this.plugin.getCockpitData();
+    if (!data) {
+      this.currentNowParentIndex = null;
+      this.currentFilePath = null;
+      this.nextEl.replaceChildren();
+      this.mustEl.replaceChildren();
+      this.scheduledEl.replaceChildren();
+      this.appendCockpitItem(this.nextEl, "—", true);
+      this.appendCockpitItem(this.mustEl, "—", true);
+      this.appendCockpitItem(this.scheduledEl, "—", true);
+      this.nowEl.textContent = "READY";
+      this.nowTimeEl.textContent = "";
+      if (this.headerTimeEl && this.headerDateEl) {
+        this.headerTimeEl.textContent = window.moment().format("HH:mm");
+        this.headerDateEl.textContent = window.moment().format("YYYY-MM-DD");
+      }
+      return;
+    }
+
+    if (data.missing) {
+      this.currentNowParentIndex = null;
+      this.currentFilePath = data.filePath || null;
+      this.nextEl.replaceChildren();
+      this.mustEl.replaceChildren();
+      this.scheduledEl.replaceChildren();
+      const label = `No log found for TODAY (${data.dateStr})`;
+      this.appendCockpitItem(this.nextEl, label, true);
+      this.appendCockpitItem(this.mustEl, "—", true);
+      this.appendCockpitItem(this.scheduledEl, "—", true);
+      this.nowEl.textContent = "READY";
+      this.nowTimeEl.textContent = "";
+      if (this.headerTimeEl && this.headerDateEl) {
+        this.headerTimeEl.textContent = window.moment().format("HH:mm");
+        this.headerDateEl.textContent = window.moment().format("YYYY-MM-DD");
+      }
+      const existing = this.containerEl.querySelector(".tc-cockpit-open-today");
+      if (!existing) {
+        const btn = this.containerEl.createEl("button", {
+          cls: "tc-cockpit-open-today",
+          text: `Open TODAY (${data.dateStr})`,
+        });
+        btn.addEventListener("click", async () => {
+          await this.plugin.openTaskchuteByDate(data.dateStr);
+          this.render();
+        });
+      }
+      return;
+    }
+
+    this.currentNowParentIndex = data.now?.parentIndex ?? null;
+    this.currentFilePath = data.filePath || null;
+
+    // NEXT
+    this.nextEl.replaceChildren();
+    if (data.next) {
+      this.appendCockpitItem(this.nextEl, this.plugin.sanitizeCockpitText(data.next));
+    } else {
+      this.appendCockpitItem(this.nextEl, "—", true);
+    }
+
+    // MUST
+    this.mustEl.replaceChildren();
+    if (data.must.length) {
+      data.must.forEach((t) => {
+        const text = typeof t === "string" ? t : t?.text;
+        const done = typeof t === "object" && t?.done;
+        this.appendCockpitItem(this.mustEl, this.plugin.sanitizeCockpitText(text), false, done);
+      });
+    } else {
+      this.appendCockpitItem(this.mustEl, "—", true);
+    }
+
+    // NOW
+    if (data.now) {
+      this.nowEl.textContent = this.plugin.sanitizeCockpitText(data.now.title);
+      this.nowTimeEl.textContent = data.now.timeText || "";
+    } else {
+      this.nowEl.textContent = "READY";
+      this.nowTimeEl.textContent = "";
+    }
+
+    // SCHEDULED
+    this.scheduledEl.replaceChildren();
+    if (data.scheduled.length) {
+      data.scheduled.forEach((t) => this.appendCockpitItem(this.scheduledEl, this.plugin.sanitizeCockpitText(t), false, false, true));
+    } else {
+      this.appendCockpitItem(this.scheduledEl, "—", true);
+    }
+
+    if (this.headerTimeEl && this.headerDateEl) {
+      this.headerTimeEl.textContent = window.moment().format("HH:mm");
+      this.headerDateEl.textContent = window.moment().format("YYYY-MM-DD");
+    }
+  }
+
+  appendCockpitItem(container, text, muted = false, done = false, preserveTime = false) {
+    const item = container.createDiv({ cls: "tc-cp-item" });
+    if (muted) item.addClass("is-muted");
+    if (done) item.addClass("is-done");
+    item.createEl("span", { cls: "tc-cp-mark" });
+    const safeText = preserveTime ? text : this.plugin.sanitizeCockpitText(text);
+    item.createEl("span", { cls: "tc-cp-text", text: safeText });
+  }
+}
 
 function escapeRegExp(text) {
   return String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -129,6 +404,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
         this.updatePlayerVisibility();
         this.updateMobileToolbarVisibility();
         this.updateHorizonHeaderVisibility();
+        this.refreshCockpitView();
         this.refreshAllMarkdownEditors();
       })
     );
@@ -138,6 +414,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
         this.updatePlayerVisibility();
         this.updateMobileToolbarVisibility();
         this.updateHorizonHeaderVisibility();
+        this.refreshCockpitView();
         this.refreshAllMarkdownEditors();
       })
     );
@@ -154,7 +431,15 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       this.updatePlayerVisibility();
       this.updateMobileToolbarVisibility();
       this.updateHorizonHeaderVisibility();
+      this.refreshCockpitView();
     });
+    this.registerEvent(
+      this.app.vault.on("modify", (file) => {
+        if (file?.path && this.isTaskchuteLogPath(file.path)) {
+          this.refreshCockpitView();
+        }
+      })
+    );
 
     this.updateTaskchuteActiveFlag();
     this.applyDisplaySettings();
@@ -167,7 +452,8 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     this.registerSuggestStyles();
     this.addSettingTab(new TaskChuteSettingTab(this.app, this));
-    this.ensureHorizonHeaderUI();
+    if (this.settings.enableHorizonHeader) this.ensureHorizonHeaderUI();
+    this.registerView(COCKPIT_VIEW_TYPE, (leaf) => new TaskChuteCockpitView(leaf, this));
 
     // =================================================
     // Commands
@@ -219,6 +505,33 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       name: "TaskChute: Toggle Horizon Header",
       icon: "clock",
       callback: () => this.toggleHorizonHeader(),
+    });
+
+    this.addCommand({
+      id: "taskchute-toggle-cockpit-sidebar",
+      name: "TaskChute: Toggle Cockpit Sidebar",
+      icon: "layout-dashboard",
+      callback: () => this.toggleCockpitSidebar(),
+    });
+
+    this.addCommand({
+      id: "taskchute-toggle-must-mark",
+      name: "TaskChute: Toggle MUST Mark",
+      icon: "star",
+      callback: () => this.toggleMustMark(),
+    });
+    this.addCommand({
+      id: "taskchute-insert-must-mark",
+      name: "TaskChute: Insert MUST Marker",
+      icon: "star",
+      callback: () => this.insertMustMark(),
+    });
+
+    this.addCommand({
+      id: "taskchute-open-help",
+      name: "TaskChute: Open Help",
+      icon: "help-circle",
+      callback: () => this.openHelpUrl(),
     });
 
     this.addCommand({
@@ -311,6 +624,12 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       icon: "rotate-ccw",
       callback: () => this.resumeTask(),
     });
+    this.addCommand({
+      id: "taskchute-time-punch",
+      name: "TaskChute: Time Punch",
+      icon: "hand",
+      callback: () => this.timePunch(),
+    });
 
     this.addCommand({
       id: "taskchute-recalc-duration",
@@ -391,6 +710,11 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       this.settings.enableMobileToolbar = DEFAULT_SETTINGS.enableMobileToolbar;
       changed = true;
     }
+    if (!Number.isFinite(this.settings.dayRolloverHour)) {
+      this.settings.dayRolloverHour = DEFAULT_SETTINGS.dayRolloverHour;
+      changed = true;
+    }
+    this.settings.dayRolloverHour = Math.min(23, Math.max(0, Math.trunc(this.settings.dayRolloverHour)));
     if (typeof this.settings.mobileToolbarRow1Enabled !== "boolean") {
       this.settings.mobileToolbarRow1Enabled = DEFAULT_SETTINGS.mobileToolbarRow1Enabled;
       changed = true;
@@ -426,6 +750,11 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     }
     if (typeof this.settings.settingsVersion !== "number") {
       this.settings.settingsVersion = DEFAULT_SETTINGS.settingsVersion;
+      changed = true;
+    }
+    const tabIds = ["general", "templates", "display", "advanced", "cockpit", "mobile"];
+    if (!tabIds.includes(this.settings.activeSettingsTab)) {
+      this.settings.activeSettingsTab = DEFAULT_SETTINGS.activeSettingsTab;
       changed = true;
     }
     if (changed) {
@@ -1381,6 +1710,193 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     new Notice(this.settings.enableHorizonHeader ? "Horizon Header: ON" : "Horizon Header: OFF");
   }
 
+  async toggleCockpitSidebar() {
+    const leaves = this.app.workspace.getLeavesOfType(COCKPIT_VIEW_TYPE);
+    if (leaves.length > 0) {
+      leaves.forEach((leaf) => leaf.detach());
+      return;
+    }
+
+    const leaf = this.app.workspace.getRightLeaf(false);
+    if (!leaf) return;
+    await leaf.setViewState({ type: COCKPIT_VIEW_TYPE, active: true });
+    this.refreshCockpitView();
+  }
+
+  refreshCockpitView() {
+    const leaves = this.app.workspace.getLeavesOfType(COCKPIT_VIEW_TYPE);
+    leaves.forEach((leaf) => {
+      const view = leaf.view;
+      if (view && typeof view.render === "function") view.render();
+    });
+  }
+
+  sanitizeCockpitText(text) {
+    let t = String(text || "");
+    t = t.replace(/<!--\s*tc:id=[a-zA-Z0-9_-]+\s*-->/g, "");
+    t = t.replace(/\(\s*\d+\s*m?\s*\)/g, "");
+    // [[title|alias]] or [[title]]
+    t = t.replace(/\[\[([^|\]]+)\|([^\]]+)\]\]/g, "$2");
+    t = t.replace(/\[\[([^\]]+)\]\]/g, "$1");
+    // [label](url)
+    t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
+    // bare URLs
+    t = t.replace(/https?:\/\/\S+/g, "");
+    t = t.replace(/\s+/g, " ").trim();
+    return t;
+  }
+
+  toggleMustMark() {
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view) return void new Notice("Markdownエディタを開いてね");
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+    const editor = view.editor;
+    if (!editor) return void new Notice("エディタが見つからなかったよ");
+
+    const cursor = editor.getCursor();
+    let parentLine = this.findParentLineIndex(editor, cursor.line);
+    if (parentLine === null) return void new Notice("親行にカーソルを置いてね");
+
+    const lineText = editor.getLine(parentLine);
+    if (!/^-\s+/.test(lineText)) return void new Notice("親行にカーソルを置いてね");
+
+    let updated = lineText;
+    if (/^-\s*★\s+/.test(lineText)) {
+      updated = lineText.replace(/^(-\s*)★\s+/, "$1");
+    } else {
+      updated = lineText.replace(/^-\s+/, "- ★ ");
+    }
+
+    editor.setLine(parentLine, updated);
+    editor.setCursor({ line: parentLine, ch: updated.length });
+    this.refreshCockpitView();
+  }
+
+  insertMustMark() {
+    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view) return void new Notice("Markdownエディタを開いてね");
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) return void new Notice("taskchuteログを開いてね");
+    const editor = view.editor;
+    if (!editor) return void new Notice("エディタが見つからなかったよ");
+
+    const cursor = editor.getCursor();
+    let parentLine = this.findParentLineIndex(editor, cursor.line);
+    if (parentLine === null) return void new Notice("親行にカーソルを置いてね");
+
+    const lineText = editor.getLine(parentLine);
+    if (!/^-\s+/.test(lineText)) return void new Notice("親行にカーソルを置いてね");
+    if (/^-\s*★\s+/.test(lineText)) return;
+
+    const updated = lineText.replace(/^-\s+/, "- ★ ");
+    editor.setLine(parentLine, updated);
+    editor.setCursor({ line: parentLine, ch: updated.length });
+    this.refreshCockpitView();
+  }
+
+  isMustParentLine(rawLineText) {
+    const text = String(rawLineText || "");
+    if (!/^-/.test(text)) return false; // exclude indented child lines
+    return /^-\s*★\s*/.test(text);
+  }
+
+  openHelpUrl() {
+    const url = "https://github.com/plzsayyes3/obsidian-taskchute-mini#usage";
+    window.open(url, "_blank");
+  }
+
+  wireCockpitButton(el, { onClick, onLongPress }) {
+    let timer = null;
+    let fired = false;
+
+    const clear = () => {
+      if (timer) window.clearTimeout(timer);
+      timer = null;
+    };
+
+    el.addEventListener("pointerdown", (ev) => {
+      fired = false;
+      timer = window.setTimeout(() => {
+        fired = true;
+        if (onLongPress) onLongPress(ev);
+      }, 400);
+    });
+
+    el.addEventListener("pointerup", (ev) => {
+      const shouldClick = !fired;
+      clear();
+      if (shouldClick && onClick) onClick(ev);
+    });
+
+    el.addEventListener("pointerleave", clear);
+    el.addEventListener("pointercancel", clear);
+  }
+
+  openCockpitMenu(ev, items) {
+    const menu = new Menu(this.app);
+    items.forEach((it) => {
+      menu.addItem((i) => i.setTitle(it.label).onClick(it.run));
+    });
+    if (ev && typeof menu.showAtMouseEvent === "function") {
+      return menu.showAtMouseEvent(ev);
+    }
+    menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+  }
+
+  async runCockpitActionOnToday(action) {
+    if (!this.ensureMoment()) return;
+    const dateStr = window.moment().format("YYYY-MM-DD");
+    const leaf = this.getPreferredMarkdownLeaf();
+    if (!leaf) return void new Notice("Markdownエディタを開いてね");
+    const ok = await this.openTaskchuteByDateInLeaf(dateStr, leaf);
+    if (!ok) return;
+    await new Promise((r) => window.setTimeout(r, 0));
+    await action();
+  }
+
+  getPreferredMarkdownLeaf() {
+    const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const activeLeaf = active?.leaf || null;
+    if (activeLeaf && !activeLeaf.getViewState().pinned) return activeLeaf;
+
+    const leaves = this.app.workspace.getLeavesOfType("markdown");
+    const unpinned = leaves.find((leaf) => !leaf.getViewState().pinned);
+    if (unpinned) return unpinned;
+
+    return null; // ピン留めしか無い場合は開かない
+  }
+
+  async openTaskchuteByDateInLeaf(dateStr, leaf) {
+    try {
+      const vault = this.app.vault;
+      const folder = this.settings.logFolderPath;
+      const filePath = `${folder}/${dateStr}.md`;
+
+      await this.ensureFolderExists(folder);
+
+      let file = vault.getAbstractFileByPath(filePath);
+      if (file && !(file instanceof TFile)) {
+        new Notice("同名のフォルダがあるよ");
+        return false;
+      }
+      if (!file) {
+        file = await vault.create(filePath, `# TaskChute ${dateStr}\n\n`);
+      }
+      if (!(file instanceof TFile)) {
+        new Notice("ログファイルを開けなかったよ");
+        return false;
+      }
+
+      await leaf.openFile(file, { active: true });
+      return true;
+    } catch (err) {
+      console.error("[TaskChute] Failed to open log:", dateStr, err);
+      new Notice("ログを開けなかったよ");
+      return false;
+    }
+  }
+
   ensureHorizonHeaderUI() {
     if (this.horizonHeaderEl) return;
     const el = document.createElement("div");
@@ -1466,6 +1982,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
   updateNowPlaying() {
     this.updatePlayerNowPlayingText();
+    this.refreshCockpitView();
   }
 
   updatePlayerNowPlayingText() {
@@ -1480,15 +1997,210 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     }
 
     const info = this.getNowPlayingInfo(editor);
-    if (!info) {
-      this.nowPlayingTitleEl.textContent = "Ready";
+    this.nowPlayingTitleEl.textContent = info ? `▶ ${info.titleText}` : "Ready";
+
+    const summary = this.getPlayerEstimateSummary(editor);
+    if (!summary) {
       this.nowPlayingSubEl.textContent = "";
-      return;
+    } else if (this.hasMoment()) {
+      const now = window.moment();
+      const eta = now.clone().add(summary.remainingMinutes, "minutes");
+      const etaText = eta.format("HH:mm");
+      const dayDiff = eta.clone().startOf("day").diff(now.clone().startOf("day"), "days");
+      const suffix = dayDiff > 0 ? ` (+${dayDiff}d)` : "";
+      this.nowPlayingSubEl.textContent = `残り: ${summary.remainingMinutes}m / 終了予定: ${etaText}${suffix}`;
+    } else {
+      this.nowPlayingSubEl.textContent = `残り: ${summary.remainingMinutes}m`;
+    }
+    this.updateHorizonHeaderDisplay(true);
+  }
+
+  async getCockpitData() {
+    const source = await this.getCockpitContentSource();
+    if (!source) return null;
+    if (source.missing) {
+      return {
+        now: null,
+        next: null,
+        must: [],
+        scheduled: [],
+        filePath: source.filePath,
+        missing: true,
+        dateStr: source.dateStr,
+      };
+    }
+    const parsed = this.parseCockpitContent(source.content);
+    return { ...parsed, filePath: source.filePath, missing: false, dateStr: source.dateStr };
+  }
+
+  async getCockpitContentSource() {
+    if (!this.hasMoment()) return null;
+    const dateStr = window.moment().format("YYYY-MM-DD");
+    const filePath = `${this.settings.logFolderPath}/${dateStr}.md`;
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!file || !(file instanceof TFile)) {
+      return { filePath, content: null, missing: true, dateStr };
+    }
+    const content = await this.app.vault.read(file);
+    return { filePath: file.path, content, missing: false, dateStr };
+  }
+
+  parseCockpitContent(content) {
+    const lines = String(content || "").split(/\r?\n/);
+    const parents = [];
+
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (/^\s*#{1,6}\s+/.test(line)) {
+        i++;
+        continue;
+      }
+      if (/^-\s+/.test(line)) {
+        const start = i;
+        i++;
+        while (i < lines.length && !/^-\s+/.test(lines[i]) && !/^\s*#{1,6}\s+/.test(lines[i])) i++;
+        const end = i;
+        parents.push({ index: start, text: line, children: lines.slice(start + 1, end) });
+        continue;
+      }
+      i++;
     }
 
-    this.nowPlayingTitleEl.textContent = `▶ ${info.titleText}`;
-    this.nowPlayingSubEl.textContent = info.subText || "";
-    this.updateHorizonHeaderDisplay(true);
+    // NOW: latest unfinished hourglass
+    let now = null;
+    let nowParentIndex = null;
+    let nowLineText = null;
+    for (let li = lines.length - 1; li >= 0; li--) {
+      const t = lines[li];
+      if (this.isHourglassLine(t) && !this.hasEndTimeOnHourglass(t)) {
+        nowLineText = t;
+        for (let j = li - 1; j >= 0; j--) {
+          if (/^\s*#{1,6}\s+/.test(lines[j])) break;
+          if (/^-\s+/.test(lines[j])) {
+            nowParentIndex = j;
+            break;
+          }
+        }
+        break;
+      }
+    }
+
+    if (nowParentIndex != null) {
+      const parentText = lines[nowParentIndex];
+      const title = this.stripTaskMetaForNowPlaying(parentText);
+      const start = this.extractStartTimeFromHourglass(nowLineText) || "";
+      const estimate = this.extractEstimateMinutesFromParentLine(parentText);
+      let timeText = "";
+      if (start && estimate) {
+        const nowTime = window.moment().format("HH:mm");
+        const elapsed = this.diffMinutesHHMM(start, nowTime);
+        const eta = this.addMinutesHHMM(start, estimate);
+        timeText = `${start} +${elapsed}m → ${eta}`;
+      } else if (start) {
+        timeText = `${start}`;
+      }
+      now = { title, timeText, parentIndex: nowParentIndex };
+    }
+
+    // NEXT
+    let next = null;
+    for (const p of parents) {
+      if (/^-\s+📝/.test(p.text)) continue;
+      let hasDone = false;
+      let hasUnfinished = false;
+      for (const c of p.children) {
+        if (/^\s+-\s*✔️/.test(c)) hasDone = true;
+        if (this.isHourglassLine(c) && !this.hasEndTimeOnHourglass(c)) hasUnfinished = true;
+      }
+      if (!hasDone && !hasUnfinished) {
+        next = this.stripTaskMetaForNowPlaying(p.text);
+        break;
+      }
+    }
+
+    // MUST
+    const must = [];
+    for (const p of parents) {
+      if (this.isMustParentLine(p.text)) {
+        let hasDone = false;
+        for (const c of p.children) {
+          if (/^\s+-\s*✔️/.test(c)) {
+            hasDone = true;
+            break;
+          }
+        }
+        must.push({ text: this.stripTaskMetaForNowPlaying(p.text), done: hasDone });
+      }
+      if (must.length >= 3) break;
+    }
+
+    // SCHEDULED
+    const scheduled = [];
+    for (const p of parents) {
+      const hasTime = /^-\s+\d{2}:\d{2}\b/.test(p.text);
+      if (!hasTime) continue;
+      let hasDone = false;
+      for (const c of p.children) {
+        if (/^\s+-\s*✔️/.test(c)) {
+          hasDone = true;
+          break;
+        }
+      }
+      if (hasDone) continue;
+      scheduled.push(p.text);
+    }
+
+    return {
+      now,
+      next,
+      must,
+      scheduled,
+    };
+  }
+
+  cockpitJumpToNow(filePath, parentIndex) {
+    if (!filePath || parentIndex == null) return;
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const editor = view?.editor;
+    if (!view || !editor) return;
+    if (!view.file || view.file.path !== filePath) return;
+
+    editor.setCursor({ line: parentIndex, ch: 0 });
+    if (typeof editor.scrollIntoView === "function") {
+      editor.scrollIntoView({ from: { line: parentIndex, ch: 0 }, to: { line: parentIndex, ch: 0 } });
+    }
+  }
+
+  async cockpitAddMemo(filePath, parentIndex, text) {
+    if (parentIndex == null || !text) return false;
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const editor = view?.editor;
+    const file = view?.file || null;
+
+    if (file && file.path === filePath && editor) {
+      const boundary = this.findParentBlockBoundary(editor, parentIndex);
+      const insertAfterLine = Math.max(parentIndex, boundary - 1);
+      const insertPos = { line: insertAfterLine, ch: editor.getLine(insertAfterLine).length };
+      editor.replaceRange(`\n  - 📝 ${text}`, insertPos);
+      return true;
+    }
+
+    const targetFile = this.app.vault.getAbstractFileByPath(filePath);
+    if (!targetFile || !(targetFile instanceof TFile)) return false;
+    const content = await this.app.vault.read(targetFile);
+    const lines = content.split(/\r?\n/);
+    if (parentIndex < 0 || parentIndex >= lines.length) return false;
+    let boundary = lines.length;
+    for (let i = parentIndex + 1; i < lines.length; i++) {
+      if (/^\s*#{1,6}\s+/.test(lines[i]) || /^-\s+/.test(lines[i])) {
+        boundary = i;
+        break;
+      }
+    }
+    lines.splice(boundary, 0, `  - 📝 ${text}`);
+    await this.app.vault.modify(targetFile, lines.join("\n"));
+    return true;
   }
 
   updateHorizonHeaderDisplay(forceEta = false) {
@@ -1685,6 +2397,31 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     }
     if (est) parts.push(`Now Est: ${est}m`);
     return { titleText, subText: parts.join(" / ") };
+  }
+
+  getPlayerEstimateSummary(editor) {
+    const lineCount = editor.lineCount();
+    let totalEstimate = 0;
+    let totalActual = 0;
+    for (let i = 0; i < lineCount; i++) {
+      const t = editor.getLine(i);
+      if (/^\s*#{1,6}\s+/.test(t)) continue;
+      if (/^-\s+/.test(t)) {
+        const est = this.extractEstimateMinutesFromParentLine(t);
+        if (est) totalEstimate += est;
+        continue;
+      }
+      if (/^\s+-\s*✔️/.test(t)) {
+        const matches = t.match(/\+(\d+)m/g);
+        if (!matches) continue;
+        matches.forEach((m) => {
+          const n = Number(m.replace(/\D/g, ""));
+          if (Number.isFinite(n)) totalActual += n;
+        });
+      }
+    }
+    const remainingMinutes = Math.max(0, totalEstimate - totalActual);
+    return { totalEstimate, totalActual, remainingMinutes };
   }
 
   startPlayerNowPlayingTicker() {
@@ -1917,6 +2654,9 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     menu.addItem((item) => item.setTitle("Resume").onClick(() => this.resumeTask()));
     menu.addItem((item) => item.setTitle("End at Estimate").onClick(() => this.endTaskAtEstimate()));
     menu.addItem((item) => item.setTitle("Time Punch…").onClick(() => this.timePunch()));
+
+    menu.addSeparator();
+    menu.addItem((item) => item.setTitle("Help / Usage").onClick(() => this.openHelpUrl()));
 
     menu.showAtMouseEvent(ev);
   }
@@ -2171,12 +2911,13 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
           const isParent = /^-\s+/.test(text);
           const isSelectedLine = sel.from <= line.to && sel.to >= line.from;
 
+          const spans = [];
           const idRe = /<!--\s*tc:id=[a-zA-Z0-9_-]+\s*-->/g;
           let m;
           while ((m = idRe.exec(text))) {
             const from = line.from + m.index;
             const to = from + m[0].length;
-            b.add(from, to, idHidden);
+            spans.push({ from, to, deco: idHidden });
           }
 
           if (isParent && !isSelectedLine) {
@@ -2185,9 +2926,12 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
             while ((em = estRe.exec(text))) {
               const from = line.from + em.index;
               const to = from + em[0].length;
-              b.add(from, to, Decoration.mark({ class: "tcm-estimate-badge" }));
+              spans.push({ from, to, deco: Decoration.mark({ class: "tcm-estimate-badge" }) });
             }
           }
+
+          spans.sort((a, b) => (a.from - b.from) || (a.to - b.to));
+          for (const s of spans) b.add(s.from, s.to, s.deco);
 
           pos = line.to + 1;
         }
@@ -2312,6 +3056,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     editor.replaceRange("\n" + insertText, insertPos);
     editor.setCursor({ line: insertAfterLine + 1, ch: insertText.length });
+    this.refreshCockpitView();
   }
 
   // =================================================
@@ -2348,6 +3093,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     editor.replaceRange(insertText, insertPos);
     editor.setCursor({ line: newLineIndex, ch: 3 });
+    this.refreshCockpitView();
   }
 
   // =================================================
@@ -2522,7 +3268,9 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       if (!targetFile) return void new Notice("対象ログが見つからないよ");
 
       try {
-        await this.app.workspace.getLeaf(true).openFile(targetFile);
+        const leaf = this.getPreferredMarkdownLeaf();
+        if (!leaf) return void new Notice("Markdownエディタが見つからなかったよ");
+        await leaf.openFile(targetFile, { active: true });
       } catch (err) {
         console.error("[TaskChute] Failed to open log:", targetFile?.path, err);
         return void new Notice("ログを開けなかったよ");
@@ -2702,7 +3450,9 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     }
 
     try {
-      await this.app.workspace.getLeaf(true).openFile(targetFile);
+      const leaf = this.getPreferredMarkdownLeaf();
+      if (!leaf) return void new Notice("Markdownエディタが見つからなかったよ");
+      await leaf.openFile(targetFile, { active: true });
     } catch (err) {
       console.error("[TaskChute] Failed to open log:", targetFile?.path, err);
       return void new Notice("ログを開けなかったよ");
@@ -2763,7 +3513,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     if (!editor) return void new Notice("エディタが見つからなかったよ");
     const initialPath = view.file?.path || "";
 
-    const input = window.prompt("Time Punch (HHmm):");
+    const input = await this.promptTimePunchInput();
     if (input == null) return;
 
     const timeStr = this.parseHHmmToHHmm(input);
@@ -2792,7 +3542,9 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     const hourglass = this.findLatestUnfinishedHourglassChild(latestEditor, parentLine);
     if (!hourglass) {
-      const childText = `  - ⌛ ${timeStr}–  `;
+      const chosenStart = await this.promptTimePunchStartChoice(timeStr);
+      if (!chosenStart) return;
+      const childText = `  - ⌛ ${chosenStart}–  `;
       const insertPos = { line: parentLine, ch: latestEditor.getLine(parentLine).length };
       latestEditor.replaceRange("\n" + childText, insertPos);
       latestEditor.setCursor({ line: parentLine + 1, ch: childText.length });
@@ -2807,11 +3559,85 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       return;
     }
 
-    const minutes = this.diffMinutesHHMM(startTime, timeStr);
-    const doneText = `  - ✔️ ${startTime}–${timeStr} +${minutes}m`;
+    const chosenEnd = await this.promptTimePunchStartChoice(timeStr);
+    if (!chosenEnd) return;
+
+    const minutes = this.diffMinutesHHMM(startTime, chosenEnd);
+    const doneText = `  - ✔️ ${startTime}–${chosenEnd} +${minutes}m`;
     latestEditor.setLine(lineIndex, doneText);
     latestEditor.setCursor({ line: lineIndex, ch: doneText.length });
     this.updateNowPlaying();
+  }
+
+  async promptTimePunchInput() {
+    return new Promise((resolve) => {
+      let settled = false;
+      const modal = new Modal(this.app);
+      modal.titleEl.setText("Time Punch (HHmm)");
+      const wrap = modal.contentEl.createDiv({ cls: "tc-timepunch-modal" });
+      const input = wrap.createEl("input", { type: "text" });
+      input.placeholder = "0930";
+      input.inputMode = "numeric";
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          settled = true;
+          modal.close();
+          resolve(input.value.trim());
+        } else if (ev.key === "Escape") {
+          settled = true;
+          modal.close();
+          resolve(null);
+        }
+      });
+
+      const actions = wrap.createDiv({ cls: "tc-timepunch-actions" });
+      const okBtn = actions.createEl("button", { text: "OK" });
+      okBtn.addEventListener("click", () => {
+        settled = true;
+        modal.close();
+        resolve(input.value.trim());
+      });
+      const cancelBtn = actions.createEl("button", { text: "Cancel" });
+      cancelBtn.addEventListener("click", () => {
+        settled = true;
+        modal.close();
+        resolve(null);
+      });
+
+      modal.onOpen = () => {
+        window.setTimeout(() => input.focus(), 0);
+      };
+      modal.onClose = () => {
+        if (!settled) resolve(null);
+      };
+      modal.open();
+    });
+  }
+
+  async promptTimePunchStartChoice(baseTimeStr) {
+    if (!this.ensureMoment()) return null;
+    const options = [
+      { label: `入力時刻で開始 (${baseTimeStr})`, offset: 0 },
+      { label: "5分前から開始", offset: -5 },
+      { label: "10分前から開始", offset: -10 },
+      { label: "15分前から開始", offset: -15 },
+    ];
+    let picked = null;
+    const menu = new Menu(this.app);
+    options.forEach((o) => {
+      menu.addItem((item) => {
+        item.setTitle(o.label).onClick(() => {
+          picked = this.addMinutesHHMM(baseTimeStr, o.offset);
+        });
+      });
+    });
+    menu.addSeparator();
+    menu.addItem((item) => item.setTitle("Cancel").onClick(() => (picked = null)));
+    await new Promise((resolve) => {
+      menu.onHide(resolve);
+      menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+    });
+    return picked;
   }
 
   // =================================================
@@ -2952,6 +3778,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     editor.replaceRange("\n" + insertText, insertPos);
     editor.setCursor({ line: insertAfterLine + 1, ch: insertText.length });
+    this.refreshCockpitView();
   }
 
   // =================================================
@@ -3462,8 +4289,62 @@ class TaskChuteSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
+    containerEl.addClass("taskchute-settings");
+    const tabs = [
+      { id: "general", label: "General", desc: "ログの基本設定" },
+      { id: "templates", label: "Templates", desc: "テンプレ関連の設定" },
+      { id: "display", label: "Display", desc: "表示・UIの設定" },
+      { id: "advanced", label: "Advanced / Debug", desc: "リセットやヘルプ" },
+      { id: "cockpit", label: "Cockpit / NowPlaying", desc: "コクピット / NowPlaying 関連" },
+      { id: "mobile", label: "Mobile", desc: "モバイル専用の設定" },
+    ];
 
-    containerEl.createEl("h3", { text: "General" });
+    const activeTab = tabs.find((t) => t.id === this.plugin.settings.activeSettingsTab)
+      ? this.plugin.settings.activeSettingsTab
+      : "general";
+    this.plugin.settings.activeSettingsTab = activeTab;
+
+    const tabBar = containerEl.createDiv({ cls: "tc-settings-tabs" });
+    const tabContentWrap = containerEl.createDiv({ cls: "tc-settings-contents" });
+    const tabContainers = {};
+
+    const setActive = async (id) => {
+      Object.entries(tabContainers).forEach(([key, el]) => {
+        el.style.display = key === id ? "block" : "none";
+      });
+      tabBar.querySelectorAll("button").forEach((btn) => {
+        btn.classList.toggle("is-active", btn.dataset.tab === id);
+      });
+      this.plugin.settings.activeSettingsTab = id;
+      await this.plugin.saveSettings();
+    };
+
+    tabs.forEach((t) => {
+      const btn = tabBar.createEl("button", {
+        cls: "tc-settings-tab-btn",
+        text: t.label,
+      });
+      btn.dataset.tab = t.id;
+      btn.addEventListener("click", () => setActive(t.id));
+
+      const section = tabContentWrap.createDiv({ cls: "tc-settings-tab" });
+      section.createEl("h3", { text: t.label });
+      section.createEl("p", { cls: "tc-settings-tab-desc", text: t.desc });
+      tabContainers[t.id] = section;
+    });
+
+    this.renderGeneral(tabContainers.general);
+    this.renderTemplates(tabContainers.templates);
+    this.renderDisplay(tabContainers.display);
+    this.renderAdvanced(tabContainers.advanced);
+    this.renderCockpit(tabContainers.cockpit);
+    this.renderMobile(tabContainers.mobile);
+
+    setActive(activeTab);
+  }
+
+  renderGeneral(containerEl) {
+    if (!containerEl) return;
 
     const setting = new Setting(containerEl)
       .setName("Log folder path")
@@ -3567,8 +4448,10 @@ class TaskChuteSettingTab extends PluginSettingTab {
         this.display();
       });
     });
+  }
 
-    containerEl.createEl("h3", { text: "Templates" });
+  renderTemplates(containerEl) {
+    if (!containerEl) return;
 
     new Setting(containerEl)
       .setName("Enable templates")
@@ -3681,8 +4564,10 @@ class TaskChuteSettingTab extends PluginSettingTab {
         this.display();
       });
     });
+  }
 
-    containerEl.createEl("h3", { text: "Display" });
+  renderDisplay(containerEl) {
+    if (!containerEl) return;
 
     new Setting(containerEl)
       .setName("Enable focus mode")
@@ -3720,73 +4605,7 @@ class TaskChuteSettingTab extends PluginSettingTab {
         });
       });
 
-    containerEl.createEl("h3", { text: "Mobile Toolbar" });
-
-    new Setting(containerEl)
-      .setName("Enable mobile toolbar")
-      .setDesc("モバイル専用の多段ツールバーを表示します")
-      .addToggle((toggle) => {
-        toggle.setValue(this.plugin.settings.enableMobileToolbar);
-        toggle.onChange(async (value) => {
-          this.plugin.settings.enableMobileToolbar = value;
-          await this.plugin.saveSettings();
-          this.plugin.applyDisplaySettings();
-        });
-      });
-
-    new Setting(containerEl)
-      .setName("Row 1 enabled")
-      .addToggle((toggle) => {
-        toggle.setValue(this.plugin.settings.mobileToolbarRow1Enabled);
-        toggle.onChange(async (value) => {
-          this.plugin.settings.mobileToolbarRow1Enabled = value;
-          await this.plugin.saveSettings();
-          this.plugin.renderMobileToolbar();
-          this.plugin.updateMobileToolbarVisibility();
-        });
-      });
-
-    new Setting(containerEl)
-      .setName("Row 2 enabled")
-      .addToggle((toggle) => {
-        toggle.setValue(this.plugin.settings.mobileToolbarRow2Enabled);
-        toggle.onChange(async (value) => {
-          this.plugin.settings.mobileToolbarRow2Enabled = value;
-          await this.plugin.saveSettings();
-          this.plugin.renderMobileToolbar();
-          this.plugin.updateMobileToolbarVisibility();
-        });
-      });
-
-    new Setting(containerEl)
-      .setName("Row 3 enabled")
-      .addToggle((toggle) => {
-        toggle.setValue(this.plugin.settings.mobileToolbarRow3Enabled);
-        toggle.onChange(async (value) => {
-          this.plugin.settings.mobileToolbarRow3Enabled = value;
-          await this.plugin.saveSettings();
-          this.plugin.renderMobileToolbar();
-          this.plugin.updateMobileToolbarVisibility();
-        });
-      });
-
-    new Setting(containerEl)
-      .setName("Row 3 default state")
-      .setDesc("Row 3 の初期状態")
-      .addDropdown((dropdown) => {
-        dropdown.addOption("collapsed", "Collapsed");
-        dropdown.addOption("expanded", "Expanded");
-        dropdown.setValue(this.plugin.settings.mobileToolbarRow3Collapsed ? "collapsed" : "expanded");
-        dropdown.onChange(async (value) => {
-          this.plugin.settings.mobileToolbarRow3Collapsed = value === "collapsed";
-          await this.plugin.saveSettings();
-          this.plugin.mobileToolbarRow3Collapsed = this.plugin.settings.mobileToolbarRow3Collapsed;
-          this.plugin.renderMobileToolbar();
-          this.plugin.updateMobileToolbarVisibility();
-        });
-      });
-
-    containerEl.createEl("h3", { text: "Player" });
+    containerEl.createEl("h4", { text: "Player" });
 
     new Setting(containerEl)
       .setName("Enable player mode")
@@ -3916,7 +4735,7 @@ class TaskChuteSettingTab extends PluginSettingTab {
         });
       });
 
-    containerEl.createEl("h3", { text: "Player / Grid" });
+    containerEl.createEl("h4", { text: "Player / Grid" });
 
     new Setting(containerEl)
       .setName("≡ ボタンの挙動")
@@ -3964,8 +4783,10 @@ class TaskChuteSettingTab extends PluginSettingTab {
           });
         });
     }
+  }
 
-    containerEl.createEl("h3", { text: "Advanced" });
+  renderAdvanced(containerEl) {
+    if (!containerEl) return;
 
     new Setting(containerEl).addButton((btn) => {
       btn.setButtonText("Reset to defaults");
@@ -3977,6 +4798,89 @@ class TaskChuteSettingTab extends PluginSettingTab {
         this.display();
       });
     });
+
+    const helpBlock = containerEl.createEl("div", { cls: "tc-help-block" });
+    helpBlock.createEl("p", { text: "迷ったらヘルプを開いてください。" });
+    const helpLink = helpBlock.createEl("a", { text: "Open Help / Usage" });
+    helpLink.setAttribute("href", "https://github.com/plzsayyes3/obsidian-taskchute-mini#usage");
+    helpLink.setAttribute("target", "_blank");
+    helpLink.setAttribute("rel", "noopener");
+  }
+
+  renderCockpit(containerEl) {
+    if (!containerEl) return;
+    containerEl.createEl("p", {
+      cls: "tc-settings-tab-desc",
+      text: "現在、Cockpit / NowPlaying の追加設定はありません。",
+    });
+  }
+
+  renderMobile(containerEl) {
+    if (!containerEl) return;
+
+    new Setting(containerEl)
+      .setName("Enable mobile toolbar")
+      .setDesc("モバイル専用の多段ツールバーを表示します")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.enableMobileToolbar);
+        toggle.onChange(async (value) => {
+          this.plugin.settings.enableMobileToolbar = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyDisplaySettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Row 1 enabled")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.mobileToolbarRow1Enabled);
+        toggle.onChange(async (value) => {
+          this.plugin.settings.mobileToolbarRow1Enabled = value;
+          await this.plugin.saveSettings();
+          this.plugin.renderMobileToolbar();
+          this.plugin.updateMobileToolbarVisibility();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Row 2 enabled")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.mobileToolbarRow2Enabled);
+        toggle.onChange(async (value) => {
+          this.plugin.settings.mobileToolbarRow2Enabled = value;
+          await this.plugin.saveSettings();
+          this.plugin.renderMobileToolbar();
+          this.plugin.updateMobileToolbarVisibility();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Row 3 enabled")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.mobileToolbarRow3Enabled);
+        toggle.onChange(async (value) => {
+          this.plugin.settings.mobileToolbarRow3Enabled = value;
+          await this.plugin.saveSettings();
+          this.plugin.renderMobileToolbar();
+          this.plugin.updateMobileToolbarVisibility();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Row 3 default state")
+      .setDesc("Row 3 の初期状態")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("collapsed", "Collapsed");
+        dropdown.addOption("expanded", "Expanded");
+        dropdown.setValue(this.plugin.settings.mobileToolbarRow3Collapsed ? "collapsed" : "expanded");
+        dropdown.onChange(async (value) => {
+          this.plugin.settings.mobileToolbarRow3Collapsed = value === "collapsed";
+          await this.plugin.saveSettings();
+          this.plugin.mobileToolbarRow3Collapsed = this.plugin.settings.mobileToolbarRow3Collapsed;
+          this.plugin.renderMobileToolbar();
+          this.plugin.updateMobileToolbarVisibility();
+        });
+      });
   }
 
   closeSuggest(el) {

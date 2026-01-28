@@ -141,6 +141,23 @@ logFolderPath/YYYY-MM-DD.md が開きます
 
 ---
 
+
+---
+
+## Player/Horizon の配置とサイズ
+
+### 表示位置
+
+- Player placement で Embedded / Floating を切り替え
+- Floating の場合はドラッグ移動可能
+  - Player は下段中央のグリップバー
+  - Horizon はヘッダー全体を掴む
+
+### サイズ
+
+- Player size / Horizon size で拡大縮小（70–140%）
+- Size range を変更するとスライダー範囲も変わる
+
 ## 表示モード
 
 ### Focus Mode

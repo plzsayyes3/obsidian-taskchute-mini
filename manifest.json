@@ -1,9 +1,9 @@
 {
   "id": "obsidian-taskchute-min",
   "name": "TaskChute (min)",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "minAppVersion": "1.5.0",
-  "description": "TaskChute minimal logging plugin with Horizon Header, mobile toolbar, estimate controls, and template tools.",
+  "description": "TaskChute minimal logging plugin with Horizon Header, player UI (embedded/floating), drag/size controls, mobile toolbar, estimate controls, and template tools.",
   "author": "shuu",
   "authorUrl": "",
   "isDesktopOnly": false,

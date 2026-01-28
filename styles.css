@@ -267,3 +267,261 @@
 .taskchute-player .tc-chip.tc-chip-clear {
   color: color-mix(in srgb, var(--text-normal) 80%, red 20%);
 }
+
+/* =========================
+   TaskChute Cockpit View
+   ========================= */
+
+.taskchute-cockpit-view {
+  padding: 12px;
+}
+
+.taskchute-cockpit-view .tc-cockpit-root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.taskchute-cockpit-view .tc-cockpit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.taskchute-cockpit-view .tc-cockpit-time {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.taskchute-cockpit-view .tc-cockpit-date {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.taskchute-cockpit-view .tc-cockpit-top {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  opacity: 0.75;
+}
+
+.taskchute-cockpit-view .tc-cockpit-box {
+  background: color-mix(in srgb, var(--background-secondary) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.taskchute-cockpit-view .tc-cockpit-title {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+  margin-bottom: 6px;
+}
+
+.taskchute-cockpit-view .tc-cockpit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.taskchute-cockpit-view .tc-cockpit-item,
+.taskchute-cockpit-view .tc-cp-item {
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.taskchute-cockpit-view .tc-cockpit-item.is-muted,
+.taskchute-cockpit-view .tc-cp-item.is-muted {
+  opacity: 0.5;
+}
+
+.taskchute-cockpit-view .tc-cp-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.taskchute-cockpit-view .tc-cp-mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 70%, transparent);
+  flex: 0 0 auto;
+}
+
+.taskchute-cockpit-view .tc-cp-text {
+  flex: 1 1 auto;
+  word-break: break-word;
+}
+
+.taskchute-cockpit-view .tc-cp-item.is-done .tc-cp-text {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.taskchute-cockpit-view .tc-cockpit-middle {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.taskchute-cockpit-view .tc-cockpit-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 560px) {
+  .taskchute-cockpit-view .tc-cockpit-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.taskchute-cockpit-view .tc-cp-btn {
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+  background: color-mix(in srgb, var(--background-secondary) 75%, transparent);
+  color: var(--text-normal);
+  border-radius: 10px;
+  padding: 8px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: center;
+  min-height: 36px;
+  cursor: pointer;
+}
+
+.taskchute-cockpit-view .tc-cp-btn:hover {
+  background: color-mix(in srgb, var(--background-secondary) 90%, transparent);
+}
+
+.taskchute-cockpit-view .tc-cp-btn:active {
+  transform: translateY(1px);
+}
+
+.taskchute-cockpit-view .tc-cockpit-now {
+  text-align: center;
+}
+
+.taskchute-cockpit-view .tc-cockpit-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+}
+
+.taskchute-cockpit-view .tc-cockpit-now-task {
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.taskchute-cockpit-view .tc-cockpit-horizon {
+  height: 1px;
+  background: color-mix(in srgb, var(--text-normal) 40%, transparent);
+  margin: 10px 0 6px;
+}
+
+.taskchute-cockpit-view .tc-cockpit-now-time {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.taskchute-cockpit-view .tc-cockpit-memo-input {
+  width: 100%;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+  background: color-mix(in srgb, var(--background-primary) 85%, transparent);
+  color: var(--text-normal);
+  padding: 8px 10px;
+  resize: none;
+}
+
+.taskchute-cockpit-view .tc-cockpit-bottom {
+  flex: 1 1 auto;
+  overflow: hidden;
+  opacity: 0.75;
+}
+
+.taskchute-cockpit-view .tc-cockpit-list-scroll {
+  overflow: auto;
+  max-height: 100%;
+}
+
+.taskchute-cockpit-view .tc-cockpit-open-today {
+  margin-top: 8px;
+  width: 100%;
+  min-height: 40px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+  background: color-mix(in srgb, var(--interactive-normal) 85%, transparent);
+  color: var(--text-normal);
+  font-size: 12px;
+}
+
+/* =========================
+   TaskChute Settings Visual
+   ========================= */
+
+.taskchute-settings h3 {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  margin: 22px 0 10px;
+}
+
+.taskchute-settings .setting-item {
+  padding: 10px 0;
+}
+
+.taskchute-settings .setting-item-name {
+  font-weight: 400;
+  font-size: 13px;
+}
+
+.taskchute-settings .setting-item-description {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.taskchute-settings .tc-settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.taskchute-settings .tc-settings-tab-btn {
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.taskchute-settings .tc-settings-tab-btn.is-active {
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary));
+  border-color: var(--interactive-accent);
+}
+
+.taskchute-settings .tc-settings-tab {
+  display: none;
+}
+
+.taskchute-settings .tc-settings-tab-desc {
+  margin-top: -4px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  opacity: 0.7;
+}

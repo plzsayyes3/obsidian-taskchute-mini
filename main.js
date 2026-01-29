@@ -99,10 +99,14 @@ class TaskChuteCockpitView extends ItemView {
     this.nowEl = null;
     this.nowTimeEl = null;
     this.scheduledEl = null;
+    this.taskListEl = null;
     this.headerTimeEl = null;
     this.headerDateEl = null;
     this.currentNowParentIndex = null;
     this.currentFilePath = null;
+    this.isEditingNow = false;
+    this.editingNowValue = "";
+    this.hasNow = false;
   }
 
   getViewType() {
@@ -132,75 +136,9 @@ class TaskChuteCockpitView extends ItemView {
     this.headerTimeEl = timeEl;
     this.headerDateEl = dateEl;
 
-    const nextBox = top.createDiv({ cls: "tc-cockpit-box" });
-    nextBox.createEl("div", { cls: "tc-cockpit-title", text: "NEXT" });
-    this.nextEl = nextBox.createDiv({ cls: "tc-cockpit-list" });
-
     const mustBox = top.createDiv({ cls: "tc-cockpit-box" });
     mustBox.createEl("div", { cls: "tc-cockpit-title", text: "MUST" });
     this.mustEl = mustBox.createDiv({ cls: "tc-cockpit-list" });
-
-    const actionBar = middle.createDiv({ cls: "tc-cockpit-actions" });
-    const btnStart = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-start", text: "▶ Start" });
-    const btnEnd = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-end", text: "■ End" });
-    const btnEas = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-eas", text: "⏭ E&S" });
-    const btnTime = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-time", text: "⏱ Time" });
-
-    this.plugin.wireCockpitButton(btnStart, {
-      onClick: () => this.plugin.runCockpitActionOnToday(() => this.plugin.startTask()),
-      onLongPress: (ev) =>
-        this.plugin.openCockpitMenu(ev, [
-          { label: "Start", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.startTask()) },
-          {
-            label: "Start From Latest Done Time",
-            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.startTaskFromLatestDoneTime()),
-          },
-          { label: "Start At…", run: () => new Notice("未実装") },
-        ]),
-    });
-
-    this.plugin.wireCockpitButton(btnEnd, {
-      onClick: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endTask()),
-      onLongPress: (ev) =>
-        this.plugin.openCockpitMenu(ev, [
-          { label: "End", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endTask()) },
-          {
-            label: "End At Estimate",
-            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endTaskAtEstimate()),
-          },
-          { label: "Time Punch", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.timePunch()) },
-          { label: "Resume", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.resumeTask()) },
-          {
-            label: "Recalculate Duration",
-            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.recalculateDurationFromActiveLine()),
-          },
-        ]),
-    });
-
-    this.plugin.wireCockpitButton(btnEas, {
-      onClick: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endAndStartTask()),
-      onLongPress: (ev) =>
-        this.plugin.openCockpitMenu(ev, [
-          {
-            label: "End & Start",
-            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endAndStartTask()),
-          },
-          { label: "Resume", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.resumeTask()) },
-          {
-            label: "Recalculate Duration",
-            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.recalculateDurationFromActiveLine()),
-          },
-        ]),
-    });
-
-    this.plugin.wireCockpitButton(btnTime, {
-      onClick: () => this.plugin.runCockpitActionOnToday(() => this.plugin.timePunch()),
-      onLongPress: (ev) =>
-        this.plugin.openCockpitMenu(ev, [
-          { label: "Time Punch", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.timePunch()) },
-          { label: "Estimate Input", run: () => new Notice("未実装") },
-        ]),
-    });
 
     const nowBox = middle.createDiv({ cls: "tc-cockpit-now" });
     nowBox.createEl("div", { cls: "tc-cockpit-label", text: "NOW EXECUTING" });
@@ -208,7 +146,91 @@ class TaskChuteCockpitView extends ItemView {
     nowBox.createDiv({ cls: "tc-cockpit-horizon" });
     this.nowTimeEl = nowBox.createDiv({ cls: "tc-cockpit-now-time", text: "" });
     this.nowEl.addEventListener("click", () => {
-      this.plugin.cockpitJumpToNow(this.currentFilePath, this.currentNowParentIndex);
+      if (!this.currentFilePath || this.currentNowParentIndex == null) return;
+      this.startNowRename();
+    });
+
+    const actionBar = middle.createDiv({ cls: "tc-cockpit-actions" });
+    const btnStart = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-start", text: "▶ Start" });
+    const btnEnd = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-end", text: "■ End" });
+    const btnEas = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-eas", text: "⏭ E&S" });
+    const btnTime = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-time", text: "⏱ Time" });
+    const btnAdd = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-add", text: "＋ Add" });
+
+    this.plugin.wireCockpitButton(btnStart, {
+      onClick: () =>
+        this.plugin.runCockpitActionOnToday(() => this.plugin.startTask(), "start"),
+      onLongPress: (ev) =>
+        this.plugin.openCockpitMenu(ev, [
+          { label: "Start", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.startTask(), "start") },
+          {
+            label: "Start From Latest Done Time",
+            run: () =>
+              this.plugin.runCockpitActionOnToday(() => this.plugin.startTaskFromLatestDoneTime(), "start-latest"),
+          },
+          { label: "Start At…", run: () => new Notice("未実装") },
+        ]),
+    });
+
+    this.plugin.wireCockpitButton(btnEnd, {
+      onClick: () =>
+        this.plugin.runCockpitActionOnToday(() => this.plugin.endTask(), "end"),
+      onLongPress: (ev) =>
+        this.plugin.openCockpitMenu(ev, [
+          { label: "End", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endTask(), "end") },
+          {
+            label: "End At Estimate",
+            run: () =>
+              this.plugin.runCockpitActionOnToday(() => this.plugin.endTaskAtEstimate(), "end-est"),
+          },
+          {
+            label: "Time Punch",
+            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.timePunch(), "time-punch"),
+          },
+          { label: "Resume", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.resumeTask(), "resume") },
+          {
+            label: "Recalculate Duration",
+            run: () =>
+              this.plugin.runCockpitActionOnToday(() => this.plugin.recalculateDurationFromActiveLine(), "recalc"),
+          },
+        ]),
+    });
+
+    this.plugin.wireCockpitButton(btnEas, {
+      onClick: () =>
+        this.plugin.runCockpitActionOnToday(() => this.plugin.endAndStartTask(), "end-start"),
+      onLongPress: (ev) =>
+        this.plugin.openCockpitMenu(ev, [
+          {
+            label: "End & Start",
+            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endAndStartTask(), "end-start"),
+          },
+          { label: "Resume", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.resumeTask(), "resume") },
+          {
+            label: "Recalculate Duration",
+            run: () =>
+              this.plugin.runCockpitActionOnToday(() => this.plugin.recalculateDurationFromActiveLine(), "recalc"),
+          },
+        ]),
+    });
+
+    this.plugin.wireCockpitButton(btnTime, {
+      onClick: () =>
+        this.plugin.runCockpitActionOnToday(() => this.plugin.timePunch(), "time-punch"),
+      onLongPress: (ev) =>
+        this.plugin.openCockpitMenu(ev, [
+          { label: "Time Punch", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.timePunch(), "time-punch") },
+          { label: "Estimate Input", run: () => new Notice("未実装") },
+        ]),
+    });
+
+    this.plugin.wireCockpitButton(btnAdd, {
+      onClick: async () => {
+        console.log("[TC] cockpit add task");
+        new Notice("[TC] add task");
+        const ok = await this.plugin.cockpitAddAndStartTask(this.currentFilePath);
+        if (ok) this.render();
+      },
     });
 
     const memoWrap = middle.createDiv({ cls: "tc-cockpit-memo" });
@@ -239,6 +261,10 @@ class TaskChuteCockpitView extends ItemView {
     schedBox.createEl("div", { cls: "tc-cockpit-title", text: "SCHEDULED" });
     this.scheduledEl = schedBox.createDiv({ cls: "tc-cockpit-list tc-cockpit-list-scroll" });
 
+    const taskBox = bottom.createDiv({ cls: "tc-cockpit-box" });
+    taskBox.createEl("div", { cls: "tc-cockpit-title", text: "TASK LIST" });
+    this.taskListEl = taskBox.createDiv({ cls: "tc-cockpit-list tc-cockpit-tasklist" });
+
     await this.render();
   }
 
@@ -247,11 +273,12 @@ class TaskChuteCockpitView extends ItemView {
     if (!data) {
       this.currentNowParentIndex = null;
       this.currentFilePath = null;
-      this.nextEl.replaceChildren();
+      this.hasNow = false;
       this.mustEl.replaceChildren();
+      this.taskListEl.replaceChildren();
       this.scheduledEl.replaceChildren();
-      this.appendCockpitItem(this.nextEl, "—", true);
       this.appendCockpitItem(this.mustEl, "—", true);
+      this.appendCockpitItem(this.taskListEl, "—", true);
       this.appendCockpitItem(this.scheduledEl, "—", true);
       this.nowEl.textContent = "READY";
       this.nowTimeEl.textContent = "";
@@ -265,12 +292,13 @@ class TaskChuteCockpitView extends ItemView {
     if (data.missing) {
       this.currentNowParentIndex = null;
       this.currentFilePath = data.filePath || null;
-      this.nextEl.replaceChildren();
+      this.hasNow = false;
       this.mustEl.replaceChildren();
+      this.taskListEl.replaceChildren();
       this.scheduledEl.replaceChildren();
       const label = `No log found for TODAY (${data.dateStr})`;
-      this.appendCockpitItem(this.nextEl, label, true);
       this.appendCockpitItem(this.mustEl, "—", true);
+      this.appendCockpitItem(this.taskListEl, "—", true);
       this.appendCockpitItem(this.scheduledEl, "—", true);
       this.nowEl.textContent = "READY";
       this.nowTimeEl.textContent = "";
@@ -294,14 +322,7 @@ class TaskChuteCockpitView extends ItemView {
 
     this.currentNowParentIndex = data.now?.parentIndex ?? null;
     this.currentFilePath = data.filePath || null;
-
-    // NEXT
-    this.nextEl.replaceChildren();
-    if (data.next) {
-      this.appendCockpitItem(this.nextEl, data.next, false, false, false, this.currentFilePath);
-    } else {
-      this.appendCockpitItem(this.nextEl, "—", true);
-    }
+    this.hasNow = !!data.now;
 
     // MUST
     this.mustEl.replaceChildren();
@@ -315,11 +336,24 @@ class TaskChuteCockpitView extends ItemView {
       this.appendCockpitItem(this.mustEl, "—", true);
     }
 
+    // TASK LIST
+    this.taskListEl.replaceChildren();
+    if (data.taskList?.length) {
+      data.taskList.forEach((item) => this.appendTaskListItem(item));
+    } else {
+      this.appendCockpitItem(this.taskListEl, "—", true);
+    }
+
     // NOW
     if (data.now) {
-      this.nowEl.textContent = this.plugin.sanitizeCockpitText(data.now.title);
+      if (this.isEditingNow) {
+        this.renderNowEditor();
+      } else {
+        this.nowEl.textContent = this.plugin.sanitizeCockpitText(data.now.title);
+      }
       this.nowTimeEl.textContent = data.now.timeText || "";
     } else {
+      this.isEditingNow = false;
       this.nowEl.textContent = "READY";
       this.nowTimeEl.textContent = "";
     }
@@ -340,6 +374,47 @@ class TaskChuteCockpitView extends ItemView {
     }
   }
 
+  appendTaskListItem(item) {
+    const row = this.taskListEl.createDiv({ cls: "tc-cp-task" });
+    if (item.isNow) row.addClass("tc-now");
+
+    const titleEl = row.createEl("div", { cls: "tc-cp-task-title", text: item.title || "—" });
+    const subEl = row.createEl("div", { cls: "tc-cp-task-sub" });
+    if (item.estimateText) {
+      subEl.createEl("span", { cls: "tc-cp-task-chip", text: item.estimateText });
+    }
+    if (item.links && item.links.length) {
+      item.links.forEach((link) => {
+        const label = link.kind === "internal" ? `⟦${link.label}⟧` : `↗︎ ${link.label}`;
+        const linkEl = subEl.createEl("a", { cls: "tc-link", text: label });
+        linkEl.setAttribute("href", "#");
+        linkEl.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          this.plugin.openCockpitLink(link, this.currentFilePath || "");
+        });
+      });
+    }
+
+    row.addEventListener("click", async () => {
+      if (this.hasNow) return;
+      const ok = await this.confirmStartTask(item.title);
+      if (!ok) return;
+      const started = await this.plugin.cockpitStartTaskFromList(this.currentFilePath, item.parentLine);
+      if (started) this.render();
+    });
+  }
+
+  async confirmStartTask(title) {
+    return new Promise((resolve) => {
+      const menu = new Menu(this.app);
+      menu.addItem((i) => i.setTitle(`Start "${title}"?`).setDisabled(true));
+      menu.addItem((i) => i.setTitle("Start").onClick(() => resolve(true)));
+      menu.addItem((i) => i.setTitle("Cancel").onClick(() => resolve(false)));
+      menu.onHide(() => resolve(false));
+      menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+    });
+  }
   appendCockpitItem(container, text, muted = false, done = false, preserveTime = false, sourcePath = "") {
     const item = container.createDiv({ cls: "tc-cp-item" });
     if (muted) item.addClass("is-muted");
@@ -352,6 +427,40 @@ class TaskChuteCockpitView extends ItemView {
       textEl.classList.add("is-link");
       item.addEventListener("click", () => this.plugin.openCockpitLink(link, sourcePath));
     }
+  }
+
+  startNowRename() {
+    if (!this.currentFilePath || this.currentNowParentIndex == null) return;
+    this.isEditingNow = true;
+    this.editingNowValue = this.nowEl.textContent || "";
+    this.render();
+  }
+
+  renderNowEditor() {
+    this.nowEl.replaceChildren();
+    const input = this.nowEl.createEl("input", { type: "text" });
+    input.value = this.editingNowValue || this.nowEl.textContent || "";
+    input.addEventListener("keydown", async (ev) => {
+      if (ev.key === "Escape") {
+        this.isEditingNow = false;
+        this.render();
+        return;
+      }
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        const next = input.value.trim();
+        if (!next) {
+          new Notice("名前が空だよ");
+          return;
+        }
+        const ok = await this.plugin.cockpitRenameNowTask(this.currentFilePath, this.currentNowParentIndex, next);
+        if (ok) {
+          this.isEditingNow = false;
+          this.render();
+        }
+      }
+    });
+    window.setTimeout(() => input.focus(), 0);
   }
 }
 
@@ -1838,6 +1947,15 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     el.addEventListener("pointerleave", clear);
     el.addEventListener("pointercancel", clear);
+
+    el.addEventListener(
+      "touchstart",
+      () => {
+        new Notice("[TC] touchstart");
+        console.log("[TC] cockpit touchstart");
+      },
+      { passive: true }
+    );
   }
 
   openCockpitMenu(ev, items) {
@@ -1851,20 +1969,31 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
   }
 
-  async runCockpitActionOnToday(action) {
+  async runCockpitActionOnToday(action, label = "action") {
+    new Notice(`[TC] clicked: ${label}`);
+    console.log("[TC] cockpit clicked:", label);
     if (!this.ensureMoment()) return;
     const dateStr = window.moment().format("YYYY-MM-DD");
     const leaf = this.getPreferredMarkdownLeaf();
     if (!leaf) return void new Notice("Markdownエディタを開いてね");
     const cockpitLeaf = this.app.workspace.getLeavesOfType(COCKPIT_VIEW_TYPE)[0] || null;
     const prevActive = this.app.workspace.activeLeaf || null;
+    console.log("[TC] about to open today:", dateStr);
+    new Notice(`[TC] run: ${label}`);
     const ok = await this.openTaskchuteByDateInLeaf(dateStr, leaf);
-    if (!ok) return;
+    if (!ok) return void new Notice("[TC] open failed");
     try {
       this.app.workspace.setActiveLeaf(leaf, { focus: true });
     } catch (_) {}
     await new Promise((r) => window.setTimeout(r, 0));
-    await action();
+    try {
+      await action();
+      console.log("[TC] done:", label);
+      new Notice(`[TC] done: ${label}`);
+    } catch (e) {
+      console.error("[TC] cockpit error:", e);
+      new Notice("[TC] error: " + (e?.message ?? e));
+    }
     const restore = cockpitLeaf || prevActive;
     if (restore) {
       try {
@@ -1888,7 +2017,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
   openCockpitLink(link, sourcePath = "") {
     if (!link) return;
-    if (link.type === "wiki") {
+    if (link.kind === "internal") {
       const dest = this.app.metadataCache.getFirstLinkpathDest(link.target, sourcePath || "");
       if (dest) {
         const leaf = this.getPreferredMarkdownLeaf();
@@ -1902,11 +2031,138 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     }
 
     const url = link.target;
+    if (typeof this.app.openExternal === "function") {
+      this.app.openExternal(url);
+      return;
+    }
     if (typeof this.app.openWithDefaultApp === "function") {
       this.app.openWithDefaultApp(url);
-    } else {
-      window.open(url, "_blank");
+      return;
     }
+    window.open(url, "_blank");
+  }
+
+  extractLinksFromParentLine(text) {
+    const raw = String(text || "");
+    const results = [];
+
+    const wikiRe = /\[\[([^\]|]+)(\|([^\]]+))?\]\]/g;
+    let wm;
+    while ((wm = wikiRe.exec(raw))) {
+      results.push({ kind: "internal", target: wm[1], label: wm[3] || wm[1] });
+    }
+
+    const mdRe = /\[([^\]]+)\]\(([^)]+)\)/g;
+    let mm;
+    while ((mm = mdRe.exec(raw))) {
+      const url = mm[2];
+      const label = mm[1];
+      results.push({ kind: "external", target: url, label });
+    }
+
+    const rawUrlRe = /(shortcuts:\/\/[^\s)]+|https?:\/\/[^\s)]+|obsidian:\/\/[^\s)]+)/gi;
+    let rm;
+    while ((rm = rawUrlRe.exec(raw))) {
+      const url = rm[1];
+      results.push({ kind: "external", target: url, label: "link" });
+    }
+
+    return results;
+  }
+
+  async cockpitAddAndStartTask(filePath) {
+    if (!this.ensureMoment()) return false;
+    if (!filePath) return false;
+    try {
+      const file = this.app.vault.getAbstractFileByPath(filePath);
+      if (!file || !(file instanceof TFile)) return false;
+      const content = await this.app.vault.read(file);
+      const lines = content.split(/\r?\n/);
+
+      let hourglassLine = -1;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (this.isHourglassLine(lines[i]) && !this.hasEndTimeOnHourglass(lines[i])) {
+          hourglassLine = i;
+          break;
+        }
+      }
+      if (hourglassLine < 0) {
+        new Notice("実行中の⌛が見つからない。Startしてから追加してね");
+        return false;
+      }
+
+      let parentLine = -1;
+      for (let i = hourglassLine - 1; i >= 0; i--) {
+        if (/^\s*#{1,6}\s+/.test(lines[i])) break;
+        if (/^-\s+/.test(lines[i])) {
+          parentLine = i;
+          break;
+        }
+      }
+      if (parentLine < 0) {
+        new Notice("親タスクが見つからないよ");
+        return false;
+      }
+
+      let boundary = lines.length;
+      for (let i = parentLine + 1; i < lines.length; i++) {
+        if (/^\s*#{1,6}\s+/.test(lines[i]) || /^-\s+/.test(lines[i])) {
+          boundary = i;
+          break;
+        }
+      }
+
+      const tcId = this.generateTcId();
+      const parentText = `- 新規タスク <!-- tc:id=${tcId} -->`;
+      const timeStr = window.moment().format("HH:mm");
+      const childText = `  - ⌛ ${timeStr}–  `;
+      lines.splice(boundary, 0, parentText, childText);
+
+      await this.app.vault.modify(file, lines.join("\n"));
+      this.refreshCockpitView();
+      return true;
+    } catch (err) {
+      console.error("[TaskChute] cockpit add failed:", err);
+      new Notice("追加に失敗したよ");
+      return false;
+    }
+  }
+
+  async cockpitRenameNowTask(filePath, parentIndex, newName) {
+    if (!filePath) return false;
+    try {
+      const file = this.app.vault.getAbstractFileByPath(filePath);
+      if (!file || !(file instanceof TFile)) return false;
+      const content = await this.app.vault.read(file);
+      const lines = content.split(/\r?\n/);
+      if (parentIndex < 0 || parentIndex >= lines.length) return false;
+
+      const line = lines[parentIndex];
+      const updated = this.updateParentLineTaskName(line, newName);
+      lines[parentIndex] = updated;
+      await this.app.vault.modify(file, lines.join("\n"));
+      this.refreshCockpitView();
+      return true;
+    } catch (err) {
+      console.error("[TaskChute] cockpit rename failed:", err);
+      new Notice("リネームに失敗したよ");
+      return false;
+    }
+  }
+
+  updateParentLineTaskName(lineText, newName) {
+    const original = String(lineText || "");
+    const suffixes = [];
+    const suffixRe = /<!--\s*tc:id=[a-zA-Z0-9_-]+\s*-->|\\(\\s*\\d+\\s*m?\\s*\\)/g;
+    let m;
+    while ((m = suffixRe.exec(original))) suffixes.push(m[0]);
+    const withoutSuffix = original.replace(suffixRe, "").replace(/\s+$/, "");
+
+    const prefixMatch = withoutSuffix.match(/^-\s*(★\s*)?(\d{2}:\d{2}\s*)?/);
+    const prefix = prefixMatch ? prefixMatch[0].replace(/^-\s*/, "") : "";
+    const rebuilt = `- ${prefix}${newName}`.trimEnd();
+    const suffixText = suffixes.length ? " " + suffixes.join(" ") : "";
+    return rebuilt + suffixText;
   }
 
   getPreferredMarkdownLeaf() {
@@ -2078,6 +2334,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
         now: null,
         next: null,
         must: [],
+        taskList: [],
         scheduled: [],
         filePath: source.filePath,
         missing: true,
@@ -2158,6 +2415,8 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       now = { title, timeText, parentIndex: nowParentIndex };
     }
 
+    const taskList = this.parseTaskListFromContent(lines, nowParentIndex);
+
     // NEXT
     let next = null;
     for (const p of parents) {
@@ -2193,7 +2452,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     // SCHEDULED
     const scheduled = [];
     for (const p of parents) {
-      const hasTime = /^-\s+\d{2}:\d{2}\b/.test(p.text);
+      const hasTime = /^-\s*(?:★\s*)?\d{2}:\d{2}\b/.test(p.text);
       if (!hasTime) continue;
       let hasDone = false;
       for (const c of p.children) {
@@ -2210,8 +2469,136 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       now,
       next,
       must,
+      taskList,
       scheduled,
     };
+  }
+
+  parseTaskListFromContent(lines, nowParentIndex) {
+    const items = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^\s*#{1,6}\s+/.test(line)) continue;
+      if (!/^-\s+/.test(line)) continue;
+      if (/^-\s+📝/.test(line)) continue;
+
+      let boundary = lines.length;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (/^\s*#{1,6}\s+/.test(lines[j]) || /^-\s+/.test(lines[j])) {
+          boundary = j;
+          break;
+        }
+      }
+
+      const latestExec = this.findLatestExecChildInLines(lines, i, boundary);
+      if (latestExec && /^\s+-\s*✔️/.test(latestExec)) {
+        i = boundary - 1;
+        continue;
+      }
+
+      if (nowParentIndex === i) {
+        i = boundary - 1;
+        continue;
+      }
+
+      const meta = this.extractTaskListMeta(line);
+      items.push({
+        parentLine: i,
+        title: meta.title,
+        estimateText: meta.estimateText,
+        links: meta.links,
+        isNow: false,
+      });
+
+      i = boundary - 1;
+    }
+    return items;
+  }
+
+  findLatestExecChildInLines(lines, parentLine, boundary) {
+    for (let i = boundary - 1; i > parentLine; i--) {
+      const t = lines[i];
+      if (/^\s+-\s*📝/.test(t)) continue;
+      if (/^\s+-\s*✔️/.test(t) || /^\s+-\s*⌛/.test(t)) return t;
+    }
+    return null;
+  }
+
+  extractTaskListMeta(parentText) {
+    const estimateMatch = String(parentText || "").match(/\(\s*\d+\s*m?\s*\)/);
+    const estimateText = estimateMatch ? estimateMatch[0] : "";
+    const title = this.sanitizeCockpitText(this.stripTaskMetaForNowPlaying(parentText));
+    const links = this.extractLinksFromParentLine(parentText);
+    return { title, estimateText, links };
+  }
+
+  findLatestDoneTimeInContent(lines) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const t = lines[i];
+      if (/^\s+-\s*✔️/.test(t)) {
+        return this.extractEndTimeFromDone(t) || this.extractStartTimeFromDone(t);
+      }
+    }
+    return null;
+  }
+
+  async cockpitStartTaskFromList(filePath, parentLine) {
+    if (!this.ensureMoment()) return false;
+    if (!filePath) return false;
+    try {
+      const file = this.app.vault.getAbstractFileByPath(filePath);
+      if (!file || !(file instanceof TFile)) return false;
+      const content = await this.app.vault.read(file);
+      const lines = content.split(/\r?\n/);
+      if (parentLine < 0 || parentLine >= lines.length) return false;
+
+      const latestDone = this.findLatestDoneTimeInContent(lines);
+      const timeStr = latestDone || window.moment().format("HH:mm");
+
+      let parentText = lines[parentLine];
+      const existingId = this.extractTcId(parentText);
+      if (!existingId) {
+        const tcId = this.generateTcId();
+        parentText = this.upsertTcIdComment(parentText, tcId);
+        lines[parentLine] = parentText;
+      }
+
+      let boundary = lines.length;
+      for (let i = parentLine + 1; i < lines.length; i++) {
+        if (/^\s*#{1,6}\s+/.test(lines[i]) || /^-\s+/.test(lines[i])) {
+          boundary = i;
+          break;
+        }
+      }
+
+      let hourglassIndex = -1;
+      for (let i = parentLine + 1; i < boundary; i++) {
+        if (/^\s+-\s*⌛/.test(lines[i])) {
+          hourglassIndex = i;
+          break;
+        }
+      }
+
+      if (hourglassIndex >= 0) {
+        if (this.hasStartTimeOnHourglass(lines[hourglassIndex])) {
+          new Notice("もう開始時刻が入ってるよ（上書きしない）");
+          return false;
+        }
+        const updated = this.insertStartTimeOnHourglass(lines[hourglassIndex], timeStr);
+        lines[hourglassIndex] = updated;
+      } else {
+        const childText = `  - ⌛ ${timeStr}–  `;
+        lines.splice(parentLine + 1, 0, childText);
+      }
+
+      await this.app.vault.modify(file, lines.join("\n"));
+      this.refreshCockpitView();
+      return true;
+    } catch (err) {
+      console.error("[TaskChute] cockpit start failed:", err);
+      new Notice("開始に失敗したよ");
+      return false;
+    }
   }
 
   cockpitJumpToNow(filePath, parentIndex) {
@@ -3498,7 +3885,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   }
 
   // =================================================
-  // Resume（最新の✔️を⌛に戻す）
+  // Resume（現在行の親配下で最新の✔️を⌛に戻す）
   // =================================================
   async resumeTask() {
     if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
@@ -3523,7 +3910,22 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
 
     const editor = view.editor;
 
-    const found = this.findLatestDoneInFile(editor);
+    const cursor = editor.getCursor();
+    const parentLine = this.findParentLineIndex(editor, cursor.line);
+    if (parentLine === null) {
+      new Notice("親行が見つからないよ");
+      return;
+    }
+
+    const boundary = this.findParentBlockBoundary(editor, parentLine);
+    let found = null;
+    for (let i = boundary - 1; i > parentLine; i--) {
+      const t = editor.getLine(i);
+      if (/^\s+-\s*✔️/.test(t)) {
+        found = { lineIndex: i, text: t };
+        break;
+      }
+    }
     if (!found) {
       new Notice("戻せる✔️が見つからないよ");
       return;
@@ -3534,12 +3936,6 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     const startTime = this.extractStartTimeFromDone(text);
     if (!startTime) {
       new Notice("✔️から開始時刻を取れなかったよ");
-      return;
-    }
-
-    const parentLine = this.findParentLineIndex(editor, lineIndex);
-    if (parentLine === null) {
-      new Notice("✔️の親行が見つからないよ");
       return;
     }
 

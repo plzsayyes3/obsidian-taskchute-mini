@@ -359,6 +359,49 @@
   word-break: break-word;
 }
 
+.taskchute-cockpit-view .tc-cockpit-tasklist {
+  overflow: auto;
+  max-height: 160px;
+}
+
+.taskchute-cockpit-view .tc-cp-task {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 4px;
+  border-radius: 8px;
+}
+
+.taskchute-cockpit-view .tc-cp-task.tc-now {
+  background: color-mix(in srgb, var(--background-secondary) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+}
+
+.taskchute-cockpit-view .tc-cp-task-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.taskchute-cockpit-view .tc-cp-task-sub {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.taskchute-cockpit-view .tc-cp-task-chip {
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+}
+
+.taskchute-cockpit-view .tc-link {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--text-normal) 40%, transparent);
+  cursor: pointer;
+}
+
 .taskchute-cockpit-view .tc-cp-item.is-done .tc-cp-text {
   text-decoration: line-through;
   opacity: 0.7;
@@ -410,6 +453,22 @@
 
 .taskchute-cockpit-view .tc-cp-btn:active {
   transform: translateY(1px);
+}
+
+.taskchute-cockpit-view .tc-cp-add {
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary));
+}
+
+.taskchute-cockpit-view .tc-cockpit-now input {
+  width: 100%;
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--background-primary);
+  color: var(--text-normal);
 }
 
 .taskchute-cockpit-view .tc-cockpit-now {

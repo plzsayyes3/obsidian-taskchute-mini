@@ -298,7 +298,7 @@ class TaskChuteCockpitView extends ItemView {
     // NEXT
     this.nextEl.replaceChildren();
     if (data.next) {
-      this.appendCockpitItem(this.nextEl, this.plugin.sanitizeCockpitText(data.next));
+      this.appendCockpitItem(this.nextEl, data.next, false, false, false, this.currentFilePath);
     } else {
       this.appendCockpitItem(this.nextEl, "—", true);
     }
@@ -309,7 +309,7 @@ class TaskChuteCockpitView extends ItemView {
       data.must.forEach((t) => {
         const text = typeof t === "string" ? t : t?.text;
         const done = typeof t === "object" && t?.done;
-        this.appendCockpitItem(this.mustEl, this.plugin.sanitizeCockpitText(text), false, done);
+        this.appendCockpitItem(this.mustEl, text, false, done, false, this.currentFilePath);
       });
     } else {
       this.appendCockpitItem(this.mustEl, "—", true);
@@ -327,7 +327,9 @@ class TaskChuteCockpitView extends ItemView {
     // SCHEDULED
     this.scheduledEl.replaceChildren();
     if (data.scheduled.length) {
-      data.scheduled.forEach((t) => this.appendCockpitItem(this.scheduledEl, this.plugin.sanitizeCockpitText(t), false, false, true));
+      data.scheduled.forEach((t) =>
+        this.appendCockpitItem(this.scheduledEl, t, false, false, true, this.currentFilePath)
+      );
     } else {
       this.appendCockpitItem(this.scheduledEl, "—", true);
     }
@@ -338,13 +340,18 @@ class TaskChuteCockpitView extends ItemView {
     }
   }
 
-  appendCockpitItem(container, text, muted = false, done = false, preserveTime = false) {
+  appendCockpitItem(container, text, muted = false, done = false, preserveTime = false, sourcePath = "") {
     const item = container.createDiv({ cls: "tc-cp-item" });
     if (muted) item.addClass("is-muted");
     if (done) item.addClass("is-done");
     item.createEl("span", { cls: "tc-cp-mark" });
     const safeText = preserveTime ? text : this.plugin.sanitizeCockpitText(text);
-    item.createEl("span", { cls: "tc-cp-text", text: safeText });
+    const textEl = item.createEl("span", { cls: "tc-cp-text", text: safeText });
+    const link = this.plugin.extractPrimaryLink(text);
+    if (link) {
+      textEl.classList.add("is-link");
+      item.addEventListener("click", () => this.plugin.openCockpitLink(link, sourcePath));
+    }
   }
 }
 
@@ -1849,10 +1856,57 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     const dateStr = window.moment().format("YYYY-MM-DD");
     const leaf = this.getPreferredMarkdownLeaf();
     if (!leaf) return void new Notice("Markdownエディタを開いてね");
+    const cockpitLeaf = this.app.workspace.getLeavesOfType(COCKPIT_VIEW_TYPE)[0] || null;
+    const prevActive = this.app.workspace.activeLeaf || null;
     const ok = await this.openTaskchuteByDateInLeaf(dateStr, leaf);
     if (!ok) return;
+    try {
+      this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    } catch (_) {}
     await new Promise((r) => window.setTimeout(r, 0));
     await action();
+    const restore = cockpitLeaf || prevActive;
+    if (restore) {
+      try {
+        this.app.workspace.setActiveLeaf(restore, { focus: true });
+      } catch (_) {}
+    }
+  }
+
+  extractPrimaryLink(rawText) {
+    const text = String(rawText || "");
+    const md = text.match(/\[[^\]]*?\]\(([^)]+)\)/);
+    if (md) return { type: "url", target: md[1] };
+    const wiki = text.match(/\[\[([^\]|]+)(\|[^\]]+)?\]\]/);
+    if (wiki) return { type: "wiki", target: wiki[1] };
+    const scheme = text.match(/([a-zA-Z]+:\/\/[^\s)]+)/);
+    if (scheme) return { type: "url", target: scheme[1] };
+    const raw = text.match(/(https?:\/\/[^\s)]+)/);
+    if (raw) return { type: "url", target: raw[1] };
+    return null;
+  }
+
+  openCockpitLink(link, sourcePath = "") {
+    if (!link) return;
+    if (link.type === "wiki") {
+      const dest = this.app.metadataCache.getFirstLinkpathDest(link.target, sourcePath || "");
+      if (dest) {
+        const leaf = this.getPreferredMarkdownLeaf();
+        if (leaf) {
+          leaf.openFile(dest, { active: true });
+          return;
+        }
+      }
+      this.app.workspace.openLinkText(link.target, sourcePath || "", false);
+      return;
+    }
+
+    const url = link.target;
+    if (typeof this.app.openWithDefaultApp === "function") {
+      this.app.openWithDefaultApp(url);
+    } else {
+      window.open(url, "_blank");
+    }
   }
 
   getPreferredMarkdownLeaf() {
@@ -1864,7 +1918,8 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     const unpinned = leaves.find((leaf) => !leaf.getViewState().pinned);
     if (unpinned) return unpinned;
 
-    return null; // ピン留めしか無い場合は開かない
+    // ピン留めしか無い場合は新規タブを開く
+    return this.app.workspace.getLeaf(true);
   }
 
   async openTaskchuteByDateInLeaf(dateStr, leaf) {
@@ -2114,7 +2169,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
         if (this.isHourglassLine(c) && !this.hasEndTimeOnHourglass(c)) hasUnfinished = true;
       }
       if (!hasDone && !hasUnfinished) {
-        next = this.stripTaskMetaForNowPlaying(p.text);
+        next = p.text;
         break;
       }
     }
@@ -2130,7 +2185,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
             break;
           }
         }
-        must.push({ text: this.stripTaskMetaForNowPlaying(p.text), done: hasDone });
+        must.push({ text: p.text, done: hasDone });
       }
       if (must.length >= 3) break;
     }
@@ -3011,7 +3066,9 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
         return;
       }
 
-      await this.app.workspace.getLeaf(true).openFile(file);
+      const leaf = this.getPreferredMarkdownLeaf();
+      if (!leaf) return void new Notice("Markdownエディタが見つからなかったよ");
+      await leaf.openFile(file, { active: true });
       const view = this.app.workspace.getActiveViewOfType(MarkdownView);
       if (!view || !view.editor) {
         new Notice("Markdownエディタが見つからなかったよ");
@@ -3214,7 +3271,9 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     }
 
     try {
-      await this.app.workspace.getLeaf(true).openFile(targetFile);
+      const leaf = this.getPreferredMarkdownLeaf();
+      if (!leaf) return void new Notice("Markdownエディタが見つからなかったよ");
+      await leaf.openFile(targetFile, { active: true });
     } catch (err) {
       console.error("[TaskChute] Failed to open log:", targetFile?.path, err);
       return void new Notice("ログを開けなかったよ");

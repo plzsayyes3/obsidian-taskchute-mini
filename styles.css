@@ -364,6 +364,11 @@
   opacity: 0.7;
 }
 
+.taskchute-cockpit-view .tc-cp-text.is-link {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--text-normal) 40%, transparent);
+}
+
 .taskchute-cockpit-view .tc-cockpit-middle {
   display: flex;
   flex-direction: column;

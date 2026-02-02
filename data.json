@@ -34,6 +34,7 @@
     "openNextDay",
     "toggleFocus"
   ],
-  "activeSettingsTab": "general",
-  "settingsVersion": 1
+  "activeSettingsTab": "display",
+  "settingsVersion": 1,
+  "useNewParser": true
 }

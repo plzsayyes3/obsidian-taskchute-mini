@@ -6,7 +6,10 @@
 /* =========================
    TaskChute Music Player Mode (Light-friendly)
    ========================= */
-
+.markdown-source-view.mod-cm6
+.cm-content li ul > li span.cm-list-bullet {
+  margin-left: 0.8em;
+}
 .taskchute-player {
   transform-origin: center bottom;
   scale: var(--tc-player-scale, 1);
@@ -407,6 +410,12 @@
   opacity: 0.7;
 }
 
+.taskchute-cockpit-view .tc-cp-item.is-done,
+.taskchute-chute-view .tc-cp-item.is-done {
+  opacity: 0.35;
+  filter: saturate(0.7);
+}
+
 .taskchute-cockpit-view .tc-cp-text.is-link {
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--text-normal) 40%, transparent);
@@ -588,4 +597,236 @@
   margin-bottom: 12px;
   font-size: 12px;
   opacity: 0.7;
+}
+/* =========================
+   TaskChute Chute Mode View (full-page)
+   cockpit-inspired full view (mobile-first)
+   - scoped to .taskchute-chute-view
+   ========================= */
+
+.taskchute-chute-view {
+  /* Standalone :root の代わりに、Viewルートで変数を持つ */
+  --tc-radius: 16px;
+  --tc-radius-lg: 22px;
+  --tc-pad: 14px;
+
+  --tc-panel: color-mix(in srgb, var(--background-secondary) 78%, transparent);
+  --tc-panel2: color-mix(in srgb, var(--background-secondary) 92%, transparent);
+  --tc-stroke: color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+
+  --tc-text: var(--text-normal);
+  --tc-muted: var(--text-muted);
+  --tc-faint: color-mix(in srgb, var(--text-muted) 70%, transparent);
+
+  --tc-accent: var(--text-accent);
+  --tc-warn: color-mix(in srgb, var(--text-normal) 75%, orange 25%);
+
+  --tc-shadow: 0 18px 50px rgba(0,0,0,0.35);
+
+  height: 100%;
+  overflow: hidden;
+  padding: 0;
+}
+
+.taskchute-chute-view.taskchute-cockpit-view {
+  padding: 12px;
+}
+
+.taskchute-chute-view * { box-sizing: border-box; }
+
+.taskchute-chute-view .chute {
+  height: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  overflow: hidden;
+}
+
+/* header sticky */
+.taskchute-chute-view .chute__header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding-top: env(safe-area-inset-top);
+  backdrop-filter: blur(16px);
+}
+
+/* horizon */
+.taskchute-chute-view .horizon {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr auto;
+  gap: 10px;
+  align-items: center;
+
+  padding: 12px 12px;
+  border-radius: var(--tc-radius-lg);
+  border: 1px solid var(--tc-stroke);
+  background: color-mix(in srgb, var(--tc-panel2) 90%, transparent);
+  box-shadow: var(--tc-shadow);
+}
+
+.taskchute-chute-view .horizon__left { display: flex; align-items: baseline; gap: 10px; }
+.taskchute-chute-view .horizon__label { font-size: 12px; letter-spacing: 0.16em; opacity: 0.85; color: var(--tc-muted); }
+.taskchute-chute-view .horizon__time { font-size: 18px; font-weight: 650; color: var(--tc-text); }
+
+.taskchute-chute-view .horizon__center { display: flex; justify-content: center; gap: 14px; }
+.taskchute-chute-view .horizon__metric {
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--tc-stroke);
+  background: color-mix(in srgb, var(--tc-panel) 92%, transparent);
+  min-width: 92px;
+  text-align: center;
+}
+.taskchute-chute-view .metric__k { font-size: 11px; color: var(--tc-muted); margin-bottom: 2px; }
+.taskchute-chute-view .metric__v { font-size: 16px; font-weight: 650; color: var(--tc-text); }
+
+/* main layout */
+.taskchute-chute-view .chute__main {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  overflow: hidden;
+}
+
+/* panels */
+.taskchute-chute-view .panel {
+  border-radius: var(--tc-radius-lg);
+  border: 1px solid var(--tc-stroke);
+  background: color-mix(in srgb, var(--tc-panel2) 90%, transparent);
+  box-shadow: 0 10px 40px rgba(0,0,0,0.22);
+  overflow: hidden;
+  min-height: 0; /* 内部スクロール安定 */
+}
+
+.taskchute-chute-view .panel__title {
+  padding: 12px var(--tc-pad);
+  border-bottom: 1px solid var(--tc-stroke);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--tc-muted);
+}
+
+.taskchute-chute-view .panel__title--now {
+  text-align: center;
+  font-weight: 700;
+  color: var(--tc-text);
+}
+
+.taskchute-chute-view .panel__body { padding: var(--tc-pad); min-height: 0; }
+.taskchute-chute-view .panel__body--now { display: grid; gap: 12px; }
+
+.taskchute-chute-view .nowcard {
+  border-radius: 18px;
+  border: 1px solid var(--tc-stroke);
+  background: color-mix(in srgb, var(--tc-panel) 92%, transparent);
+  padding: 14px 14px;
+}
+.taskchute-chute-view .nowcard__state {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--tc-accent);
+  margin-bottom: 6px;
+}
+.taskchute-chute-view .nowcard__title {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.22;
+  margin-bottom: 8px;
+  color: var(--tc-text);
+}
+.taskchute-chute-view .nowcard__meta {
+  display: grid;
+  gap: 6px;
+  color: var(--tc-muted);
+  font-size: 12px;
+}
+
+.taskchute-chute-view .link {
+  color: var(--tc-accent);
+  text-decoration: none;
+  border-bottom: 1px dashed color-mix(in srgb, var(--tc-accent) 55%, transparent);
+  width: fit-content;
+}
+
+.taskchute-chute-view .memo {
+  width: 100%;
+  min-height: 86px;
+  max-height: 160px;
+  resize: vertical;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid var(--tc-stroke);
+  background: color-mix(in srgb, var(--background-primary) 85%, transparent);
+  color: var(--tc-text);
+  outline: none;
+}
+.taskchute-chute-view .memo::placeholder { color: var(--tc-faint); }
+
+/* buttons */
+.taskchute-chute-view .btnrow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.taskchute-chute-view .btn {
+  appearance: none;
+  border: 1px solid var(--tc-stroke);
+  background: color-mix(in srgb, var(--interactive-normal) 75%, transparent);
+  color: var(--tc-text);
+  padding: 12px 12px;
+  border-radius: 16px;
+  font-weight: 650;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  transition: transform 90ms ease, background 140ms ease;
+}
+.taskchute-chute-view .btn:active {
+  transform: scale(0.98);
+  background: color-mix(in srgb, var(--interactive-hover) 75%, transparent);
+}
+
+/* task list (内部スクロール) */
+.taskchute-chute-view .list--tasks {
+  max-height: 34vh; /* 画面枠が足りない時の前提 */
+  overflow: auto;
+  padding: 12px var(--tc-pad) var(--tc-pad);
+}
+
+.taskchute-chute-view .taskrow {
+  position: relative;
+  border-radius: 16px;
+  border: 1px solid var(--tc-stroke);
+  background: color-mix(in srgb, var(--background-primary) 88%, transparent);
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+}
+.taskchute-chute-view .taskrow__title { font-size: 13px; line-height: 1.25; word-break: break-word; color: var(--tc-text); }
+.taskchute-chute-view .taskrow__meta { font-size: 11px; color: var(--tc-muted); }
+
+.taskchute-chute-view .taskrow.is-now {
+  outline: 2px solid color-mix(in srgb, var(--tc-accent) 50%, transparent);
+}
+.taskchute-chute-view .taskrow.is-done { opacity: 0.28; filter: saturate(0.7); }
+
+/* Desktop */
+@media (min-width: 920px) {
+  .taskchute-chute-view .chute { max-width: 1100px; margin: 0 auto; }
+  .taskchute-chute-view .chute__main {
+    grid-template-columns: 0.9fr 1.2fr 1fr;
+    align-items: start;
+  }
+  .taskchute-chute-view .btnrow { grid-template-columns: 1fr 1fr 1fr; }
+  .taskchute-chute-view .list--tasks { max-height: 340px; }
+}
+/* =========================
+   TaskChute: 実行ログ / 📝 のインデントを4スペース相当に調整
+   CM6 list formatting span を直接ずらす
+   ========================= */
+
+/* TaskChute の行だけに限定 */
+.markdown-source-view.mod-cm6
+.tc-dim-line
+.cm-formatting.cm-formatting-list.cm-formatting-list-ul.cm-list-2 {
+  padding-inline-start: 2em !important;
 }

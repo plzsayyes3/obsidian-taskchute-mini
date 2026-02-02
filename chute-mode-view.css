@@ -1,0 +1,90 @@
+/* chute-mode-view.css
+   Chute Mode view styling (scoped)
+   You can paste this into your plugin styles.css, or @import it if you bundle.
+*/
+.taskchute-chute-mode-view, .taskchute-chute-mode-view * { box-sizing: border-box; }
+
+.taskchute-chute-mode-view .tc-obsidian-root {
+  height: 100%;
+  overflow: hidden;
+  padding: 10px;
+}
+
+/* Reuse standalone CSS tokens, but tighten for Obsidian view */
+.taskchute-chute-mode-view .tc-root { height: 100%; display: flex; flex-direction: column; gap: 10px; }
+.taskchute-chute-mode-view .tc-header { display:flex; align-items:flex-start; justify-content:space-between; gap: 10px; }
+.taskchute-chute-mode-view .tc-header-title { font-weight: 700; font-size: 16px; }
+.taskchute-chute-mode-view .tc-header-sub { font-size: 12px; opacity: 0.7; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width: 70vw; }
+
+.taskchute-chute-mode-view .tc-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.taskchute-chute-mode-view .tc-box {
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  border-radius: 12px;
+  padding: 10px;
+  overflow: hidden;
+}
+
+.taskchute-chute-mode-view .tc-box-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  opacity: 0.75;
+  margin-bottom: 8px;
+}
+
+.taskchute-chute-mode-view .tc-empty { opacity: 0.6; padding: 8px 0; }
+
+.taskchute-chute-mode-view .tc-now-row { display:flex; flex-direction: column; gap: 10px; }
+.taskchute-chute-mode-view .tc-now-title { font-size: 18px; font-weight: 800; line-height: 1.2; }
+.taskchute-chute-mode-view .tc-now-meta { font-size: 12px; opacity: 0.7; }
+
+.taskchute-chute-mode-view .tc-now-memo {
+  width: 100%;
+  min-height: 70px;
+  border-radius: 10px;
+  padding: 10px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  resize: none;
+}
+
+.taskchute-chute-mode-view .tc-list { overflow: auto; max-height: 220px; padding-right: 6px; }
+.taskchute-chute-mode-view .tc-task-line { display:flex; align-items:center; justify-content:space-between; gap: 10px; padding: 8px 6px; border-radius: 10px; }
+.taskchute-chute-mode-view .tc-task-line:hover { background: var(--background-secondary); }
+.taskchute-chute-mode-view .tc-task-title { flex: 1; min-width: 0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.taskchute-chute-mode-view .tc-task-right { font-variant-numeric: tabular-nums; opacity: 0.7; }
+
+.taskchute-chute-mode-view .tc-link { text-decoration: underline; cursor: pointer; }
+
+.taskchute-chute-mode-view .tc-ribbon { display:flex; gap: 8px; overflow:auto; padding-bottom: 6px; }
+.taskchute-chute-mode-view .tc-ribbon-chip {
+  min-width: 120px;
+  border-radius: 12px;
+  padding: 10px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+.taskchute-chute-mode-view .tc-ribbon-chip.is-done { opacity: 0.35; }
+.taskchute-chute-mode-view .tc-ribbon-chip.is-now { border-width: 2px; }
+.taskchute-chute-mode-view .tc-ribbon-chip.is-next { border-style: dashed; }
+
+.taskchute-chute-mode-view .tc-ribbon-title { font-weight: 700; font-size: 12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.taskchute-chute-mode-view .tc-ribbon-meta { font-size: 11px; opacity: 0.7; margin-top: 4px; }
+
+/* Small helper: add a refresh button class if your HTML has it */
+.taskchute-chute-mode-view .tc-btn-refresh {
+  border-radius: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  cursor: pointer;
+}

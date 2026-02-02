@@ -85,7 +85,361 @@ const DEFAULT_SETTINGS = {
   ],
   activeSettingsTab: "general",
   settingsVersion: 1,
+  useNewParser: true,
 };
+
+const CHUTE_VIEW_TYPE = "taskchute-chute-mode";
+
+// =================================================
+// Unified Cockpit/Chute UI
+// =================================================
+function buildUnifiedCockpitUI(containerEl, handlers) {
+  containerEl.empty();
+
+  const root = containerEl.createDiv({ cls: "tc-cockpit-root" });
+
+  const header = root.createDiv({ cls: "tc-cockpit-header" });
+  const timeEl = header.createDiv({ cls: "tc-cockpit-time", text: "--:--" });
+  const dateEl = header.createDiv({ cls: "tc-cockpit-date", text: "--/--" });
+
+  const top = root.createDiv({ cls: "tc-cockpit-top" });
+  const mustBox = top.createDiv({ cls: "tc-cockpit-box" });
+  mustBox.createEl("div", { cls: "tc-cockpit-title", text: "MUST" });
+  const mustEl = mustBox.createDiv({ cls: "tc-cockpit-list" });
+
+  const middle = root.createDiv({ cls: "tc-cockpit-middle" });
+  const nowBox = middle.createDiv({ cls: "tc-cockpit-now" });
+  nowBox.createEl("div", { cls: "tc-cockpit-label", text: "NOW EXECUTING" });
+  const nowEl = nowBox.createDiv({ cls: "tc-cockpit-now-task", text: "READY" });
+  nowEl.setAttribute("data-tc-now", "1");
+  nowBox.createDiv({ cls: "tc-cockpit-horizon" });
+  const nowTimeEl = nowBox.createDiv({ cls: "tc-cockpit-now-time", text: "" });
+
+  const actionBar = middle.createDiv({ cls: "tc-cockpit-actions" });
+  const btnStart = actionBar.createEl("button", {
+    cls: "tc-cp-btn tc-cp-start",
+    text: "▶ Start",
+    attr: { "data-tc-action": "start" },
+  });
+  const btnEnd = actionBar.createEl("button", {
+    cls: "tc-cp-btn tc-cp-end",
+    text: "■ End",
+    attr: { "data-tc-action": "end" },
+  });
+  const btnEas = actionBar.createEl("button", {
+    cls: "tc-cp-btn tc-cp-eas",
+    text: "⏭ E&S",
+    attr: { "data-tc-action": "end-start" },
+  });
+  const btnTime = actionBar.createEl("button", {
+    cls: "tc-cp-btn tc-cp-time",
+    text: "⏱ Time",
+    attr: { "data-tc-action": "time-punch" },
+  });
+  const btnAdd = actionBar.createEl("button", {
+    cls: "tc-cp-btn tc-cp-add",
+    text: "＋ Add",
+    attr: { "data-tc-action": "add" },
+  });
+
+  if (handlers?.wireButton) {
+    handlers.wireButton(btnStart, "start");
+    handlers.wireButton(btnEnd, "end");
+    handlers.wireButton(btnEas, "end-start");
+    handlers.wireButton(btnTime, "time-punch");
+    handlers.wireButton(btnAdd, "add");
+  }
+
+  const memoWrap = middle.createDiv({ cls: "tc-cockpit-memo" });
+  const memoInputEl = memoWrap.createEl("textarea", {
+    cls: "tc-cockpit-memo-input",
+    attr: { placeholder: "ひとことメモ", "data-tc-role": "memo-input" },
+  });
+
+  const bottom = root.createDiv({ cls: "tc-cockpit-bottom" });
+  const schedBox = bottom.createDiv({ cls: "tc-cockpit-box" });
+  schedBox.createEl("div", { cls: "tc-cockpit-title", text: "SCHEDULED" });
+  const scheduledEl = schedBox.createDiv({ cls: "tc-cockpit-list tc-cockpit-list-scroll" });
+
+  const taskBox = bottom.createDiv({ cls: "tc-cockpit-box" });
+  taskBox.createEl("div", { cls: "tc-cockpit-title", text: "TASK LIST" });
+  const taskListEl = taskBox.createDiv({ cls: "tc-cockpit-list tc-cockpit-tasklist" });
+
+  return {
+    root,
+    timeEl,
+    dateEl,
+    mustEl,
+    nowEl,
+    nowTimeEl,
+    memoInputEl,
+    scheduledEl,
+    taskListEl,
+  };
+}
+
+function bindUnifiedCockpitHandlers(containerEl, handlers) {
+  if (containerEl.__tcUnifiedHandlers) {
+    const prev = containerEl.__tcUnifiedHandlers;
+    containerEl.removeEventListener("click", prev.onClick);
+    containerEl.removeEventListener("keydown", prev.onKeydown);
+    containerEl.removeEventListener("input", prev.onInput);
+  }
+
+  const onClick = (ev) => {
+    const linkEl = ev.target?.closest?.("[data-tc-link-idx]");
+    if (linkEl) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (linkEl.__tcLink && handlers?.onPrimaryLinkClick) {
+        handlers.onPrimaryLinkClick(linkEl.__tcLink, linkEl.__tcSourcePath || "");
+        return;
+      }
+      const taskIndex = Number(linkEl.getAttribute("data-tc-task-idx"));
+      const linkIndex = Number(linkEl.getAttribute("data-tc-link-idx"));
+      if (handlers?.onLinkClick) handlers.onLinkClick(taskIndex, linkIndex);
+      return;
+    }
+
+    const actionEl = ev.target?.closest?.("[data-tc-action]");
+    if (actionEl) {
+      if (handlers?.usesWireButton) return;
+      const action = actionEl.getAttribute("data-tc-action");
+      if (handlers?.onAction) handlers.onAction(action);
+      return;
+    }
+
+    const taskEl = ev.target?.closest?.("[data-tc-task-index]");
+    if (taskEl) {
+      const taskIndex = Number(taskEl.getAttribute("data-tc-task-index"));
+      if (handlers?.onTaskClick) handlers.onTaskClick(taskIndex);
+      return;
+    }
+
+    if (ev.target?.closest?.("[data-tc-role='now-edit']")) {
+      return;
+    }
+
+    const nowEl = ev.target?.closest?.("[data-tc-now]");
+    if (nowEl && handlers?.onNowClick) {
+      handlers.onNowClick();
+      return;
+    }
+
+    const openTodayEl = ev.target?.closest?.("[data-tc-open-today]");
+    if (openTodayEl && handlers?.onOpenToday) {
+      handlers.onOpenToday(openTodayEl.getAttribute("data-tc-date"));
+    }
+  };
+
+  const onKeydown = (ev) => {
+    const memoEl = ev.target?.closest?.("[data-tc-role='memo-input']");
+    if (memoEl && handlers?.onMemoKeydown) {
+      handlers.onMemoKeydown(ev, memoEl);
+      return;
+    }
+
+    const nowEditEl = ev.target?.closest?.("[data-tc-role='now-edit']");
+    if (nowEditEl && handlers?.onNowEditKeydown) {
+      handlers.onNowEditKeydown(ev, nowEditEl);
+    }
+  };
+
+  const onInput = (ev) => {
+    const memoEl = ev.target?.closest?.("[data-tc-role='memo-input']");
+    if (memoEl && handlers?.onMemoInput) {
+      handlers.onMemoInput(memoEl.value);
+    }
+  };
+
+  containerEl.addEventListener("click", onClick);
+  containerEl.addEventListener("keydown", onKeydown);
+  containerEl.addEventListener("input", onInput);
+  containerEl.__tcUnifiedHandlers = { onClick, onKeydown, onInput };
+}
+
+function renderChuteCockpitUnified(containerEl, data, handlers, options = {}) {
+  const state = containerEl.__tcUnifiedState;
+  const ui = state?.ui || buildUnifiedCockpitUI(containerEl, handlers);
+  containerEl.__tcUnifiedState = { ui, data, options };
+
+  bindUnifiedCockpitHandlers(containerEl, handlers);
+
+  const now = window.moment ? window.moment() : null;
+  if (ui.timeEl && ui.dateEl) {
+    ui.timeEl.textContent = now ? now.format("HH:mm") : "--:--";
+    ui.dateEl.textContent = now ? now.format("YYYY-MM-DD") : "--/--";
+  }
+
+  const hasData = !!data && !data.missing;
+  const filePath = data?.activeFilePath || data?.filePath || "";
+
+  // MUST
+  ui.mustEl.replaceChildren();
+  if (hasData && data.must?.length) {
+    data.must.forEach((t) => {
+      const text = typeof t === "string" ? t : t?.text;
+      const done = typeof t === "object" && t?.done;
+      appendUnifiedItem(ui.mustEl, text, handlers, { done, sourcePath: filePath });
+    });
+  } else {
+    appendUnifiedItem(ui.mustEl, "—", handlers, { muted: true });
+  }
+
+  // NOW
+  if (!hasData || !data.now) {
+    ui.nowEl.replaceChildren();
+    ui.nowEl.textContent = "READY";
+    ui.nowTimeEl.textContent = "";
+  } else if (options.isEditingNow) {
+    ui.nowEl.replaceChildren();
+    const input = ui.nowEl.createEl("input", {
+      type: "text",
+      attr: { "data-tc-role": "now-edit" },
+    });
+    input.value = options.editingNowValue || data.now.title || "";
+    window.setTimeout(() => input.focus(), 0);
+    ui.nowTimeEl.textContent = data.now.timeText || "";
+  } else {
+    ui.nowEl.replaceChildren();
+    ui.nowEl.textContent = handlers?.sanitizeText ? handlers.sanitizeText(data.now.title || "") : data.now.title || "";
+    ui.nowTimeEl.textContent = data.now.timeText || "";
+  }
+
+  // Memo input
+  const memoValue = options.memoDraft != null ? options.memoDraft : data?.nowMemo || "";
+  if (ui.memoInputEl && ui.memoInputEl.value !== memoValue) {
+    ui.memoInputEl.value = memoValue;
+  }
+
+  // TASK LIST
+  ui.taskListEl.replaceChildren();
+  if (hasData && data.taskList?.length) {
+    data.taskList.forEach((item, index) => appendUnifiedTaskItem(ui.taskListEl, item, index));
+  } else {
+    appendUnifiedItem(ui.taskListEl, "—", handlers, { muted: true });
+  }
+
+  // SCHEDULED
+  ui.scheduledEl.replaceChildren();
+  if (hasData && data.scheduled?.length) {
+    data.scheduled.forEach((t) => {
+      appendUnifiedItem(ui.scheduledEl, t, handlers, {
+        preserveTime: true,
+        sourcePath: filePath,
+      });
+    });
+  } else {
+    appendUnifiedItem(ui.scheduledEl, "—", handlers, { muted: true });
+  }
+
+  const existing = containerEl.querySelector(".tc-cockpit-open-today");
+  if (existing) existing.remove();
+  if (data?.missing) {
+    const btn = containerEl.createEl("button", {
+      cls: "tc-cockpit-open-today",
+      text: `Open TODAY (${data.dateStr})`,
+      attr: { "data-tc-open-today": "1", "data-tc-date": data.dateStr || "" },
+    });
+    if (handlers?.onOpenToday) {
+      // delegated handler will catch this
+    }
+  }
+}
+
+function appendUnifiedItem(container, text, handlers, opts = {}) {
+  const item = container.createDiv({ cls: "tc-cp-item" });
+  if (opts.muted) item.addClass("is-muted");
+  if (opts.done) item.addClass("is-done");
+  item.createEl("span", { cls: "tc-cp-mark" });
+  const safeText = opts.preserveTime ? text : handlers?.sanitizeText ? handlers.sanitizeText(text) : text;
+  const textEl = item.createEl("span", { cls: "tc-cp-text", text: safeText || "—" });
+
+  if (handlers?.extractPrimaryLink && opts.sourcePath) {
+    const link = handlers.extractPrimaryLink(text);
+    if (link) {
+      textEl.addClass("is-link");
+      item.setAttribute("data-tc-link-idx", "0");
+      item.setAttribute("data-tc-task-idx", "-1");
+      item.__tcLink = link;
+      item.__tcSourcePath = opts.sourcePath;
+    }
+  }
+}
+
+function appendUnifiedTaskItem(container, item, index) {
+  const row = container.createDiv({
+    cls: "tc-cp-task",
+    attr: { "data-tc-task-index": String(index) },
+  });
+  if (item.isNow) row.addClass("tc-now");
+
+  row.createEl("div", { cls: "tc-cp-task-title", text: item.title || "—" });
+  const subEl = row.createDiv({ cls: "tc-cp-task-sub" });
+
+  if (item.estimateText) {
+    subEl.createEl("span", { cls: "tc-cp-task-chip", text: item.estimateText });
+  }
+  if (item.links && item.links.length) {
+    item.links.forEach((link, linkIndex) => {
+      const label = link.kind === "internal" ? `⟦${link.label}⟧` : `↗︎ ${link.label}`;
+      const linkEl = subEl.createEl("a", {
+        cls: "tc-link",
+        text: label,
+        attr: {
+          href: "#",
+          "data-tc-task-idx": String(index),
+          "data-tc-link-idx": String(linkIndex),
+        },
+      });
+      linkEl.setAttribute("data-tc-task-idx", String(index));
+      linkEl.setAttribute("data-tc-link-idx", String(linkIndex));
+    });
+  }
+}
+
+/**
+ * Chute Mode View (Cockpit Full View)
+ * - Renders inside a side leaf (no file navigation)
+ * - Reads TaskChute log markdown as source of truth
+ */
+class ChuteModeView extends ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.memoDraft = "";
+  }
+
+  getViewType() { return CHUTE_VIEW_TYPE; }
+  getDisplayText() { return "Chute Mode"; }
+  getIcon() { return "layout-dashboard"; }
+
+  async onOpen() {
+    this.containerEl.empty();
+    this.containerEl.__tcUnifiedState = null;
+    this.containerEl.addClass("taskchute-chute-view");
+    this.containerEl.addClass("chute-mode");
+    this.containerEl.addClass("taskchute-cockpit-view");
+    await this.render();
+  }
+
+  async render() {
+    const data = await this.plugin.getCockpitData();
+    const handlers = this.plugin.buildUnifiedHandlers({
+      view: this,
+      data,
+      allowNowRename: false,
+      onMemoDraftChange: (text) => {
+        this.memoDraft = text;
+      },
+    });
+    renderChuteCockpitUnified(this.containerEl, data, handlers, {
+      memoDraft: this.memoDraft,
+      isEditingNow: false,
+    });
+  }
+}
+
 
 const COCKPIT_VIEW_TYPE = "taskchute-cockpit-view";
 
@@ -93,20 +447,13 @@ class TaskChuteCockpitView extends ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
-    this.memoInputEl = null;
-    this.nextEl = null;
-    this.mustEl = null;
-    this.nowEl = null;
-    this.nowTimeEl = null;
-    this.scheduledEl = null;
-    this.taskListEl = null;
-    this.headerTimeEl = null;
-    this.headerDateEl = null;
     this.currentNowParentIndex = null;
     this.currentFilePath = null;
     this.isEditingNow = false;
     this.editingNowValue = "";
     this.hasNow = false;
+    this.memoDraft = "";
+    this.lastNowTitle = "";
   }
 
   getViewType() {
@@ -123,344 +470,43 @@ class TaskChuteCockpitView extends ItemView {
 
   async onOpen() {
     this.containerEl.empty();
+    this.containerEl.__tcUnifiedState = null;
     this.containerEl.addClass("taskchute-cockpit-view");
-
-    const root = this.containerEl.createDiv({ cls: "tc-cockpit-root" });
-    const header = root.createDiv({ cls: "tc-cockpit-header" });
-    const top = root.createDiv({ cls: "tc-cockpit-top" });
-    const middle = root.createDiv({ cls: "tc-cockpit-middle" });
-    const bottom = root.createDiv({ cls: "tc-cockpit-bottom" });
-
-    const timeEl = header.createDiv({ cls: "tc-cockpit-time", text: "--:--" });
-    const dateEl = header.createDiv({ cls: "tc-cockpit-date", text: "--/--" });
-    this.headerTimeEl = timeEl;
-    this.headerDateEl = dateEl;
-
-    const mustBox = top.createDiv({ cls: "tc-cockpit-box" });
-    mustBox.createEl("div", { cls: "tc-cockpit-title", text: "MUST" });
-    this.mustEl = mustBox.createDiv({ cls: "tc-cockpit-list" });
-
-    const nowBox = middle.createDiv({ cls: "tc-cockpit-now" });
-    nowBox.createEl("div", { cls: "tc-cockpit-label", text: "NOW EXECUTING" });
-    this.nowEl = nowBox.createDiv({ cls: "tc-cockpit-now-task", text: "READY" });
-    nowBox.createDiv({ cls: "tc-cockpit-horizon" });
-    this.nowTimeEl = nowBox.createDiv({ cls: "tc-cockpit-now-time", text: "" });
-    this.nowEl.addEventListener("click", () => {
-      if (!this.currentFilePath || this.currentNowParentIndex == null) return;
-      this.startNowRename();
-    });
-
-    const actionBar = middle.createDiv({ cls: "tc-cockpit-actions" });
-    const btnStart = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-start", text: "▶ Start" });
-    const btnEnd = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-end", text: "■ End" });
-    const btnEas = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-eas", text: "⏭ E&S" });
-    const btnTime = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-time", text: "⏱ Time" });
-    const btnAdd = actionBar.createEl("button", { cls: "tc-cp-btn tc-cp-add", text: "＋ Add" });
-
-    this.plugin.wireCockpitButton(btnStart, {
-      onClick: () =>
-        this.plugin.runCockpitActionOnToday(() => this.plugin.startTask(), "start"),
-      onLongPress: (ev) =>
-        this.plugin.openCockpitMenu(ev, [
-          { label: "Start", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.startTask(), "start") },
-          {
-            label: "Start From Latest Done Time",
-            run: () =>
-              this.plugin.runCockpitActionOnToday(() => this.plugin.startTaskFromLatestDoneTime(), "start-latest"),
-          },
-          { label: "Start At…", run: () => new Notice("未実装") },
-        ]),
-    });
-
-    this.plugin.wireCockpitButton(btnEnd, {
-      onClick: () =>
-        this.plugin.runCockpitActionOnToday(() => this.plugin.endTask(), "end"),
-      onLongPress: (ev) =>
-        this.plugin.openCockpitMenu(ev, [
-          { label: "End", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endTask(), "end") },
-          {
-            label: "End At Estimate",
-            run: () =>
-              this.plugin.runCockpitActionOnToday(() => this.plugin.endTaskAtEstimate(), "end-est"),
-          },
-          {
-            label: "Time Punch",
-            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.timePunch(), "time-punch"),
-          },
-          { label: "Resume", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.resumeTask(), "resume") },
-          {
-            label: "Recalculate Duration",
-            run: () =>
-              this.plugin.runCockpitActionOnToday(() => this.plugin.recalculateDurationFromActiveLine(), "recalc"),
-          },
-        ]),
-    });
-
-    this.plugin.wireCockpitButton(btnEas, {
-      onClick: () =>
-        this.plugin.runCockpitActionOnToday(() => this.plugin.endAndStartTask(), "end-start"),
-      onLongPress: (ev) =>
-        this.plugin.openCockpitMenu(ev, [
-          {
-            label: "End & Start",
-            run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.endAndStartTask(), "end-start"),
-          },
-          { label: "Resume", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.resumeTask(), "resume") },
-          {
-            label: "Recalculate Duration",
-            run: () =>
-              this.plugin.runCockpitActionOnToday(() => this.plugin.recalculateDurationFromActiveLine(), "recalc"),
-          },
-        ]),
-    });
-
-    this.plugin.wireCockpitButton(btnTime, {
-      onClick: () =>
-        this.plugin.runCockpitActionOnToday(() => this.plugin.timePunch(), "time-punch"),
-      onLongPress: (ev) =>
-        this.plugin.openCockpitMenu(ev, [
-          { label: "Time Punch", run: () => this.plugin.runCockpitActionOnToday(() => this.plugin.timePunch(), "time-punch") },
-          { label: "Estimate Input", run: () => new Notice("未実装") },
-        ]),
-    });
-
-    this.plugin.wireCockpitButton(btnAdd, {
-      onClick: async () => {
-        console.log("[TC] cockpit add task");
-        new Notice("[TC] add task");
-        const ok = await this.plugin.cockpitAddAndStartTask(this.currentFilePath);
-        if (ok) this.render();
-      },
-    });
-
-    const memoWrap = middle.createDiv({ cls: "tc-cockpit-memo" });
-    this.memoInputEl = memoWrap.createEl("textarea", {
-      cls: "tc-cockpit-memo-input",
-      attr: { placeholder: "ひとことメモ" },
-    });
-    this.memoInputEl.addEventListener("keydown", async (ev) => {
-      if (ev.key === "Escape") {
-        this.memoInputEl.value = "";
-        ev.preventDefault();
-        return;
-      }
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        const text = this.memoInputEl.value.trim();
-        if (!text) return;
-        const ok = await this.plugin.cockpitAddMemo(
-          this.currentFilePath,
-          this.currentNowParentIndex,
-          text
-        );
-        if (ok) this.memoInputEl.value = "";
-      }
-    });
-
-    const schedBox = bottom.createDiv({ cls: "tc-cockpit-box" });
-    schedBox.createEl("div", { cls: "tc-cockpit-title", text: "SCHEDULED" });
-    this.scheduledEl = schedBox.createDiv({ cls: "tc-cockpit-list tc-cockpit-list-scroll" });
-
-    const taskBox = bottom.createDiv({ cls: "tc-cockpit-box" });
-    taskBox.createEl("div", { cls: "tc-cockpit-title", text: "TASK LIST" });
-    this.taskListEl = taskBox.createDiv({ cls: "tc-cockpit-list tc-cockpit-tasklist" });
-
     await this.render();
   }
 
   async render() {
     const data = await this.plugin.getCockpitData();
-    if (!data) {
-      this.currentNowParentIndex = null;
-      this.currentFilePath = null;
-      this.hasNow = false;
-      this.mustEl.replaceChildren();
-      this.taskListEl.replaceChildren();
-      this.scheduledEl.replaceChildren();
-      this.appendCockpitItem(this.mustEl, "—", true);
-      this.appendCockpitItem(this.taskListEl, "—", true);
-      this.appendCockpitItem(this.scheduledEl, "—", true);
-      this.nowEl.textContent = "READY";
-      this.nowTimeEl.textContent = "";
-      if (this.headerTimeEl && this.headerDateEl) {
-        this.headerTimeEl.textContent = window.moment().format("HH:mm");
-        this.headerDateEl.textContent = window.moment().format("YYYY-MM-DD");
-      }
-      return;
-    }
-
-    if (data.missing) {
-      this.currentNowParentIndex = null;
-      this.currentFilePath = data.filePath || null;
-      this.hasNow = false;
-      this.mustEl.replaceChildren();
-      this.taskListEl.replaceChildren();
-      this.scheduledEl.replaceChildren();
-      const label = `No log found for TODAY (${data.dateStr})`;
-      this.appendCockpitItem(this.mustEl, "—", true);
-      this.appendCockpitItem(this.taskListEl, "—", true);
-      this.appendCockpitItem(this.scheduledEl, "—", true);
-      this.nowEl.textContent = "READY";
-      this.nowTimeEl.textContent = "";
-      if (this.headerTimeEl && this.headerDateEl) {
-        this.headerTimeEl.textContent = window.moment().format("HH:mm");
-        this.headerDateEl.textContent = window.moment().format("YYYY-MM-DD");
-      }
-      const existing = this.containerEl.querySelector(".tc-cockpit-open-today");
-      if (!existing) {
-        const btn = this.containerEl.createEl("button", {
-          cls: "tc-cockpit-open-today",
-          text: `Open TODAY (${data.dateStr})`,
-        });
-        btn.addEventListener("click", async () => {
-          await this.plugin.openTaskchuteByDate(data.dateStr);
-          this.render();
-        });
-      }
-      return;
-    }
-
-    this.currentNowParentIndex = data.now?.parentIndex ?? null;
-    this.currentFilePath = data.filePath || null;
-    this.hasNow = !!data.now;
-
-    // MUST
-    this.mustEl.replaceChildren();
-    if (data.must.length) {
-      data.must.forEach((t) => {
-        const text = typeof t === "string" ? t : t?.text;
-        const done = typeof t === "object" && t?.done;
-        this.appendCockpitItem(this.mustEl, text, false, done, false, this.currentFilePath);
-      });
-    } else {
-      this.appendCockpitItem(this.mustEl, "—", true);
-    }
-
-    // TASK LIST
-    this.taskListEl.replaceChildren();
-    if (data.taskList?.length) {
-      data.taskList.forEach((item) => this.appendTaskListItem(item));
-    } else {
-      this.appendCockpitItem(this.taskListEl, "—", true);
-    }
-
-    // NOW
-    if (data.now) {
-      if (this.isEditingNow) {
-        this.renderNowEditor();
-      } else {
-        this.nowEl.textContent = this.plugin.sanitizeCockpitText(data.now.title);
-      }
-      this.nowTimeEl.textContent = data.now.timeText || "";
-    } else {
+    this.currentNowParentIndex = data?.now?.parentIndex ?? null;
+    this.currentFilePath = data?.activeFilePath || data?.filePath || null;
+    this.hasNow = !!data?.now;
+    this.lastNowTitle = data?.now?.title || "";
+    if (!data?.now) {
       this.isEditingNow = false;
-      this.nowEl.textContent = "READY";
-      this.nowTimeEl.textContent = "";
+      this.editingNowValue = "";
     }
 
-    // SCHEDULED
-    this.scheduledEl.replaceChildren();
-    if (data.scheduled.length) {
-      data.scheduled.forEach((t) =>
-        this.appendCockpitItem(this.scheduledEl, t, false, false, true, this.currentFilePath)
-      );
-    } else {
-      this.appendCockpitItem(this.scheduledEl, "—", true);
-    }
-
-    if (this.headerTimeEl && this.headerDateEl) {
-      this.headerTimeEl.textContent = window.moment().format("HH:mm");
-      this.headerDateEl.textContent = window.moment().format("YYYY-MM-DD");
-    }
-  }
-
-  appendTaskListItem(item) {
-    const row = this.taskListEl.createDiv({ cls: "tc-cp-task" });
-    if (item.isNow) row.addClass("tc-now");
-
-    const titleEl = row.createEl("div", { cls: "tc-cp-task-title", text: item.title || "—" });
-    const subEl = row.createEl("div", { cls: "tc-cp-task-sub" });
-    if (item.estimateText) {
-      subEl.createEl("span", { cls: "tc-cp-task-chip", text: item.estimateText });
-    }
-    if (item.links && item.links.length) {
-      item.links.forEach((link) => {
-        const label = link.kind === "internal" ? `⟦${link.label}⟧` : `↗︎ ${link.label}`;
-        const linkEl = subEl.createEl("a", { cls: "tc-link", text: label });
-        linkEl.setAttribute("href", "#");
-        linkEl.addEventListener("click", (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          this.plugin.openCockpitLink(link, this.currentFilePath || "");
-        });
-      });
-    }
-
-    row.addEventListener("click", async () => {
-      if (this.hasNow) return;
-      const ok = await this.confirmStartTask(item.title);
-      if (!ok) return;
-      const started = await this.plugin.cockpitStartTaskFromList(this.currentFilePath, item.parentLine);
-      if (started) this.render();
+    const handlers = this.plugin.buildUnifiedHandlers({
+      view: this,
+      data,
+      allowNowRename: true,
+      onMemoDraftChange: (text) => {
+        this.memoDraft = text;
+      },
     });
-  }
 
-  async confirmStartTask(title) {
-    return new Promise((resolve) => {
-      const menu = new Menu(this.app);
-      menu.addItem((i) => i.setTitle(`Start "${title}"?`).setDisabled(true));
-      menu.addItem((i) => i.setTitle("Start").onClick(() => resolve(true)));
-      menu.addItem((i) => i.setTitle("Cancel").onClick(() => resolve(false)));
-      menu.onHide(() => resolve(false));
-      menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+    renderChuteCockpitUnified(this.containerEl, data, handlers, {
+      memoDraft: this.memoDraft,
+      isEditingNow: this.isEditingNow,
+      editingNowValue: this.editingNowValue || this.lastNowTitle,
     });
-  }
-  appendCockpitItem(container, text, muted = false, done = false, preserveTime = false, sourcePath = "") {
-    const item = container.createDiv({ cls: "tc-cp-item" });
-    if (muted) item.addClass("is-muted");
-    if (done) item.addClass("is-done");
-    item.createEl("span", { cls: "tc-cp-mark" });
-    const safeText = preserveTime ? text : this.plugin.sanitizeCockpitText(text);
-    const textEl = item.createEl("span", { cls: "tc-cp-text", text: safeText });
-    const link = this.plugin.extractPrimaryLink(text);
-    if (link) {
-      textEl.classList.add("is-link");
-      item.addEventListener("click", () => this.plugin.openCockpitLink(link, sourcePath));
-    }
   }
 
   startNowRename() {
     if (!this.currentFilePath || this.currentNowParentIndex == null) return;
     this.isEditingNow = true;
-    this.editingNowValue = this.nowEl.textContent || "";
+    this.editingNowValue = this.lastNowTitle || "";
     this.render();
-  }
-
-  renderNowEditor() {
-    this.nowEl.replaceChildren();
-    const input = this.nowEl.createEl("input", { type: "text" });
-    input.value = this.editingNowValue || this.nowEl.textContent || "";
-    input.addEventListener("keydown", async (ev) => {
-      if (ev.key === "Escape") {
-        this.isEditingNow = false;
-        this.render();
-        return;
-      }
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        const next = input.value.trim();
-        if (!next) {
-          new Notice("名前が空だよ");
-          return;
-        }
-        const ok = await this.plugin.cockpitRenameNowTask(this.currentFilePath, this.currentNowParentIndex, next);
-        if (ok) {
-          this.isEditingNow = false;
-          this.render();
-        }
-      }
-    });
-    window.setTimeout(() => input.focus(), 0);
   }
 }
 
@@ -472,7 +518,18 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
 
-    // =================================================
+    
+
+// =================================================
+// Chute Mode View
+// =================================================
+this.registerView(CHUTE_VIEW_TYPE, (leaf) => new ChuteModeView(leaf, this));
+this.register(() => {
+  const leaves = this.app.workspace.getLeavesOfType(CHUTE_VIEW_TYPE);
+  leaves.forEach((l) => l.detach());
+  try { this.app.workspace.unregisterView(CHUTE_VIEW_TYPE); } catch (e) {}
+});
+// =================================================
     //✔️カスタムアイコン登録（任意）
     // =================================================
     addIcon(
@@ -595,7 +652,15 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       callback: () => this.openNextDay(),
     });
 
-    this.addCommand({
+    
+
+this.addCommand({
+  id: "taskchute-open-chute-mode",
+  name: "TaskChute: Open Chute Mode",
+  icon: "layout-dashboard",
+  callback: () => this.openChuteMode(),
+});
+this.addCommand({
       id: "taskchute-toggle-player-mode",
       name: "TaskChute: Toggle Player Mode",
       icon: "keyboard",
@@ -784,7 +849,12 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     this.destroyPlayerUI();
     this.destroyMobileToolbarUI();
     this.destroyHorizonHeaderUI();
-  }
+  
+
+// Detach Chute Mode leaves
+const chuteLeaves = this.app.workspace.getLeavesOfType(CHUTE_VIEW_TYPE);
+chuteLeaves.forEach((l) => l.detach());
+}
 
   async loadSettings() {
     const data = await this.loadData();
@@ -824,6 +894,10 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     }
     if (typeof this.settings.enableMobileToolbar !== "boolean") {
       this.settings.enableMobileToolbar = DEFAULT_SETTINGS.enableMobileToolbar;
+      changed = true;
+    }
+    if (typeof this.settings.useNewParser !== "boolean") {
+      this.settings.useNewParser = DEFAULT_SETTINGS.useNewParser;
       changed = true;
     }
     if (!Number.isFinite(this.settings.dayRolloverHour)) {
@@ -1396,6 +1470,20 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     this.insertAndStartTask();
   }
 
+// =================================================
+// Chute Mode
+// =================================================
+async openChuteMode() {
+  const leaf = this.app.workspace.getRightLeaf(false);
+  if (!leaf) {
+    new Notice("サイドバーを開けなかったよ");
+    return;
+  }
+  await leaf.setViewState({ type: CHUTE_VIEW_TYPE, active: true });
+  this.app.workspace.revealLeaf(leaf);
+}
+
+
   // =================================================
   // Player Mode（手動トグル）
   // =================================================
@@ -1836,15 +1924,544 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     const leaf = this.app.workspace.getRightLeaf(false);
     if (!leaf) return;
     await leaf.setViewState({ type: COCKPIT_VIEW_TYPE, active: true });
-    this.refreshCockpitView();
+    this.refreshUnifiedView();
   }
 
-  refreshCockpitView() {
-    const leaves = this.app.workspace.getLeavesOfType(COCKPIT_VIEW_TYPE);
-    leaves.forEach((leaf) => {
+  scheduleUnifiedRefresh() {
+    if (this._unifiedRefreshTimer) window.clearTimeout(this._unifiedRefreshTimer);
+    this._unifiedRefreshTimer = window.setTimeout(() => {
+      this.refreshUnifiedView();
+    }, 140);
+  }
+
+  refreshUnifiedView() {
+    const cockpitLeaves = this.app.workspace.getLeavesOfType(COCKPIT_VIEW_TYPE);
+    cockpitLeaves.forEach((leaf) => {
       const view = leaf.view;
       if (view && typeof view.render === "function") view.render();
     });
+    const chuteLeaves = this.app.workspace.getLeavesOfType(CHUTE_VIEW_TYPE);
+    chuteLeaves.forEach((leaf) => {
+      const view = leaf.view;
+      if (view && typeof view.render === "function") view.render();
+    });
+  }
+
+  refreshCockpitView() {
+    this.scheduleUnifiedRefresh();
+  }
+
+  buildUnifiedHandlers({ view, data, allowNowRename, onMemoDraftChange }) {
+    const sourcePath = data?.activeFilePath || data?.filePath || "";
+    const getTaskItem = (index) => (data?.taskList && data.taskList[index]) || null;
+    const isChuteView = view?.getViewType?.() === CHUTE_VIEW_TYPE;
+    const ctx = {
+      source: isChuteView ? "view" : "editor",
+      file: this.getTFileByPath(sourcePath),
+      activeEditor: isChuteView ? null : this.app.workspace.getActiveViewOfType(MarkdownView)?.editor || null,
+      data,
+    };
+
+    const runAction = async (action, label) => {
+      const allowOpen = false;
+      return this.runCockpitActionOnToday(action, label, { allowOpen });
+    };
+
+    const actionHandlers = {
+      start: async () => {
+        if (ctx.source === "view") {
+          await this.uiStartByParentIndex(ctx, data?.taskList?.[0]?.parentLine ?? 0);
+          if (view?.render) await view.render();
+          return;
+        }
+        await runAction(() => this.startTask(), "start");
+        if (view?.render) await view.render();
+      },
+      end: async () => {
+        if (ctx.source === "view") {
+          await this.uiEnd(ctx);
+          if (view?.render) await view.render();
+          return;
+        }
+        await runAction(() => this.endTask({ allowOpen: false }), "end");
+        if (view?.render) await view.render();
+      },
+      "end-start": async () => {
+        if (ctx.source === "view") {
+          await this.uiEndAndStart(ctx);
+          if (view?.render) await view.render();
+          return;
+        }
+        await runAction(() => this.endAndStartTask(), "end-start");
+        if (view?.render) await view.render();
+      },
+      "time-punch": async () => {
+        if (ctx.source === "view") {
+          await this.uiTimePunch(ctx);
+          if (view?.render) await view.render();
+          return;
+        }
+        await runAction(() => this.timePunch(), "time-punch");
+        if (view?.render) await view.render();
+      },
+      add: async () => {
+        if (ctx.source === "view") {
+          await this.uiAddTaskBelowNow(ctx);
+          if (view?.render) await view.render();
+          return;
+        }
+        const ok = await this.cockpitAddAndStartTask(sourcePath);
+        if (ok) this.refreshUnifiedView();
+      },
+    };
+
+    const longPressMenus =
+      ctx.source === "view"
+        ? {
+            start: (ev) =>
+              this.openCockpitMenu(ev, [{ label: "Start", run: () => actionHandlers.start() }]),
+            end: (ev) =>
+              this.openCockpitMenu(ev, [
+                { label: "End", run: () => actionHandlers.end() },
+                { label: "Time Punch", run: () => actionHandlers["time-punch"]() },
+              ]),
+            "end-start": (ev) =>
+              this.openCockpitMenu(ev, [{ label: "End & Start", run: () => actionHandlers["end-start"]() }]),
+            "time-punch": (ev) =>
+              this.openCockpitMenu(ev, [{ label: "Time Punch", run: () => actionHandlers["time-punch"]() }]),
+          }
+        : {
+            start: (ev) =>
+              this.openCockpitMenu(ev, [
+                { label: "Start", run: () => runAction(() => this.startTask(), "start") },
+                { label: "Start From Latest Done Time", run: () => runAction(() => this.startTaskFromLatestDoneTime(), "start-latest") },
+                { label: "Start At…", run: () => new Notice("未実装") },
+              ]),
+            end: (ev) =>
+              this.openCockpitMenu(ev, [
+                { label: "End", run: () => runAction(() => this.endTask({ allowOpen: false }), "end") },
+                { label: "End At Estimate", run: () => runAction(() => this.endTaskAtEstimate({ allowOpen: false }), "end-est") },
+                { label: "Time Punch", run: () => runAction(() => this.timePunch(), "time-punch") },
+                { label: "Resume", run: () => runAction(() => this.resumeTask(), "resume") },
+                { label: "Recalculate Duration", run: () => runAction(() => this.recalculateDurationFromActiveLine(), "recalc") },
+              ]),
+            "end-start": (ev) =>
+              this.openCockpitMenu(ev, [
+                { label: "End & Start", run: () => runAction(() => this.endAndStartTask(), "end-start") },
+                { label: "Resume", run: () => runAction(() => this.resumeTask(), "resume") },
+                { label: "Recalculate Duration", run: () => runAction(() => this.recalculateDurationFromActiveLine(), "recalc") },
+              ]),
+            "time-punch": (ev) =>
+              this.openCockpitMenu(ev, [
+                { label: "Time Punch", run: () => runAction(() => this.timePunch(), "time-punch") },
+                { label: "Estimate Input", run: () => new Notice("未実装") },
+              ]),
+          };
+
+    return {
+      usesWireButton: true,
+      sanitizeText: (text) => this.sanitizeCockpitText(text),
+      extractPrimaryLink: (text) => this.extractPrimaryLink(text),
+      onPrimaryLinkClick: (link, path) => {
+        const normalized = link?.kind
+          ? link
+          : link?.type === "wiki"
+            ? { kind: "internal", target: link.target, label: link.target }
+            : { kind: "external", target: link?.target, label: link?.target || "link" };
+        if (normalized?.target) this.openCockpitLink(normalized, path || sourcePath);
+      },
+      onLinkClick: (taskIndex, linkIndex) => {
+        const item = getTaskItem(taskIndex);
+        const link = item?.links?.[linkIndex];
+        if (link) this.openCockpitLink(link, sourcePath);
+      },
+      onTaskClick: async (taskIndex) => {
+        const item = getTaskItem(taskIndex);
+        if (!item) return;
+        if (data?.now) {
+          this.openCockpitMenu(null, [{ label: "Close", run: () => {} }]);
+          return;
+        }
+        const ok = await this.confirmStartTaskUnified(item.title);
+        if (!ok) return;
+        if (ctx.source === "view") {
+          await this.uiStartByParentIndex(ctx, item.parentLine);
+          if (view?.render) view.render();
+          return;
+        }
+        const started = await this.cockpitStartTaskFromList(sourcePath, item.parentLine);
+        if (started && view?.render) view.render();
+      },
+      onAction: (action) => {
+        if (actionHandlers[action]) actionHandlers[action]();
+      },
+      wireButton: (el, action) => {
+        if (!el) return;
+        this.wireCockpitButton(el, {
+          onClick: () => actionHandlers[action]?.(),
+          onLongPress: longPressMenus[action],
+        });
+      },
+      onMemoKeydown: async (ev, memoEl) => {
+        if (ev.key === "Escape") {
+          memoEl.value = "";
+          if (onMemoDraftChange) onMemoDraftChange("");
+          ev.preventDefault();
+          return;
+        }
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          const text = memoEl.value.trim();
+          if (!text) return;
+          const ok = await this.cockpitAddMemo(sourcePath, data?.now?.parentIndex ?? null, text);
+          if (ok) {
+            memoEl.value = "";
+            if (onMemoDraftChange) onMemoDraftChange("");
+            this.refreshUnifiedView();
+          }
+        }
+      },
+      onMemoInput: (text) => {
+        if (onMemoDraftChange) onMemoDraftChange(text);
+      },
+      onNowClick: () => {
+        if (!allowNowRename || !data?.now) return;
+        if (typeof view?.startNowRename === "function") view.startNowRename();
+      },
+      onNowEditKeydown: async (ev, inputEl) => {
+        if (ev.key === "Escape") {
+          view.isEditingNow = false;
+          if (view?.render) view.render();
+          return;
+        }
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          const next = String(inputEl.value || "").trim();
+          if (!next) {
+            new Notice("名前が空だよ");
+            return;
+          }
+          const ok = await this.cockpitRenameNowTask(sourcePath, data?.now?.parentIndex ?? null, next);
+          if (ok) {
+            view.isEditingNow = false;
+            if (view?.render) view.render();
+          }
+        }
+      },
+      onOpenToday: async (dateStr) => {
+        if (!dateStr) return;
+        await this.openTaskchuteByDate(dateStr);
+        if (view?.render) view.render();
+      },
+    };
+  }
+
+  // =================================================
+  // UI Context (Editor/View)
+  // =================================================
+  getTFileByPath(path) {
+    if (!path) return null;
+    const file = this.app.vault.getAbstractFileByPath(path);
+    return file instanceof TFile ? file : null;
+  }
+
+  async resolveTargetLogFile(ctx) {
+    if (ctx?.file instanceof TFile) return ctx.file;
+    const byPath = this.getTFileByPath(ctx?.data?.activeFilePath || "");
+    if (byPath) return byPath;
+    return await this.resolveFileForFallback();
+  }
+
+  async readLines(file) {
+    const content = await this.app.vault.read(file);
+    return String(content || "").split(/\r?\n/);
+  }
+
+  async writeLines(file, lines) {
+    await this.app.vault.modify(file, lines.join("\n"));
+  }
+
+  async withFileLines(file, editor) {
+    const lines = await this.readLines(file);
+    const result = await editor(lines);
+    if (result?.changed) {
+      await this.writeLines(file, result.lines || lines);
+    }
+    return result;
+  }
+
+  resolveParentLineIndexFromLines(lines, parentIndex) {
+    if (!Array.isArray(lines)) return null;
+    if (typeof parentIndex === "number" && parentIndex >= 0 && parentIndex < lines.length) {
+      if (/^-\s+/.test(lines[parentIndex])) return parentIndex;
+    }
+
+    let count = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^\s*#{1,6}\s+/.test(line)) continue;
+      if (/^-\s+/.test(line)) {
+        if (count === parentIndex) return i;
+        count++;
+      }
+    }
+    return null;
+  }
+
+  findParentBlockBoundaryFromLines(lines, parentLine) {
+    let boundary = lines.length;
+    for (let i = parentLine + 1; i < lines.length; i++) {
+      if (/^\s*#{1,6}\s+/.test(lines[i]) || /^-\s+/.test(lines[i])) {
+        boundary = i;
+        break;
+      }
+    }
+    return boundary;
+  }
+
+  findLatestUnfinishedHourglassInLines(lines) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const t = lines[i];
+      if (this.isHourglassLine(t) && !this.hasEndTimeOnHourglass(t)) {
+        return { lineIndex: i, text: t };
+      }
+    }
+    return null;
+  }
+
+  findLatestUnfinishedHourglassChildInLines(lines, parentLine) {
+    const boundary = this.findParentBlockBoundaryFromLines(lines, parentLine);
+    for (let i = boundary - 1; i > parentLine; i--) {
+      const t = lines[i];
+      if (this.isHourglassLine(t) && !this.hasEndTimeOnHourglass(t)) {
+        return { lineIndex: i, text: t };
+      }
+    }
+    return null;
+  }
+
+  findFirstTaskParentFromTopLines(lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i];
+      if (/^\s*#{1,6}\s+/.test(t)) continue;
+      if (/^-\s+📝/.test(t)) continue;
+      if (/^-\s+/.test(t)) return i;
+    }
+    return null;
+  }
+
+  findFirstUnprocessedTaskParentFromLines(lines) {
+    const snapshot = this.parseTaskchuteSnapshot(lines.join("\n"));
+    const task = snapshot?.tasks?.find(
+      (t) => t.status === "ready" && !/^-\s+📝/.test(t.raw)
+    );
+    return task ? task.lineNo : null;
+  }
+
+  resolveNowParentLineFromSnapshot(snapshot) {
+    const idx = snapshot?.currentParentIndex;
+    if (typeof idx !== "number") return null;
+    const task = snapshot?.tasks?.[idx];
+    return task ? task.lineNo : null;
+  }
+
+  startByParentIndexOnLines(lines, parentIndex, timeStr) {
+    const parentLine = this.resolveParentLineIndexFromLines(lines, parentIndex);
+    if (parentLine == null) return { changed: false, reason: "parent-not-found", lines };
+
+    if (!timeStr) timeStr = window.moment ? window.moment().format("HH:mm") : "";
+    let parentText = lines[parentLine];
+
+    const existingId = this.extractTcId(parentText);
+    if (!existingId) {
+      const tcId = this.generateTcId();
+      parentText = this.upsertTcIdComment(parentText, tcId);
+      lines[parentLine] = parentText;
+    }
+
+    const boundary = this.findParentBlockBoundaryFromLines(lines, parentLine);
+    let hourglassIndex = -1;
+    for (let i = parentLine + 1; i < boundary; i++) {
+      if (this.isHourglassLine(lines[i])) {
+        hourglassIndex = i;
+        break;
+      }
+    }
+
+    if (hourglassIndex >= 0) {
+      if (this.hasStartTimeOnHourglass(lines[hourglassIndex])) {
+        return { changed: false, reason: "already-started", lines };
+      }
+      const updated = this.insertStartTimeOnHourglass(lines[hourglassIndex], timeStr);
+      lines[hourglassIndex] = updated;
+      return { changed: true, lines };
+    }
+
+    const childText = `  - ⌛ ${timeStr}–  `;
+    lines.splice(parentLine + 1, 0, childText);
+    return { changed: true, lines };
+  }
+
+  applyEndAtHourglassLineOnLines(lines, lineIndex) {
+    const text = lines[lineIndex];
+    if (!this.isHourglassLine(text)) return { changed: false, reason: "not-hourglass", lines };
+    if (this.hasEndTimeOnHourglass(text)) return { changed: false, reason: "already-ended", lines };
+    const startTime = this.extractStartTimeFromHourglass(text);
+    if (!startTime) return { changed: false, reason: "missing-start", lines };
+    const endTime = window.moment ? window.moment().format("HH:mm") : "";
+    const minutes = this.diffMinutesHHMM(startTime, endTime);
+    lines[lineIndex] = `  - ✔️ ${startTime}–${endTime} +${minutes}m`;
+    return { changed: true, lines };
+  }
+
+  async uiStartByParentIndex(ctx, parentIndex, options = {}) {
+    if (!this.ensureMoment()) return false;
+    const targetFile = await this.resolveTargetLogFile(ctx);
+    if (!targetFile) {
+      new Notice("対象ログが見つからないよ");
+      return false;
+    }
+    const timeStr = options.timeStr || (window.moment ? window.moment().format("HH:mm") : "");
+    const result = await this.withFileLines(targetFile, (lines) =>
+      this.startByParentIndexOnLines(lines, parentIndex, timeStr)
+    );
+    if (!result?.changed) {
+      if (result?.reason === "already-started") new Notice("もう開始時刻が入ってるよ（上書きしない）");
+      if (result?.reason === "parent-not-found") new Notice("開始できるタスクが見つからないよ");
+      return false;
+    }
+    this.refreshUnifiedView();
+    return true;
+  }
+
+  async uiEnd(ctx) {
+    if (!this.ensureMoment()) return false;
+    const targetFile = await this.resolveTargetLogFile(ctx);
+    if (!targetFile) {
+      new Notice("対象ログが見つからないよ");
+      return false;
+    }
+    const result = await this.withFileLines(targetFile, (lines) => {
+      const target = this.findLatestUnfinishedHourglassInLines(lines);
+      if (!target) return { changed: false, reason: "not-found", lines };
+      return this.applyEndAtHourglassLineOnLines(lines, target.lineIndex);
+    });
+    if (!result?.changed) {
+      if (result?.reason === "not-found") new Notice("未完了の⌛が見つからないよ");
+      if (result?.reason === "missing-start") new Notice("未完了⌛に開始時刻が無いよ（Startで入れてね）");
+      return false;
+    }
+    this.refreshUnifiedView();
+    return true;
+  }
+
+  async uiEndAndStart(ctx) {
+    if (!this.ensureMoment()) return false;
+    const targetFile = await this.resolveTargetLogFile(ctx);
+    if (!targetFile) {
+      new Notice("対象ログが見つからないよ");
+      return false;
+    }
+    const result = await this.withFileLines(targetFile, (lines) => {
+      const target = this.findLatestUnfinishedHourglassInLines(lines);
+      if (!target) return { changed: false, reason: "not-found", lines };
+      const ended = this.applyEndAtHourglassLineOnLines(lines, target.lineIndex);
+      if (!ended.changed) return ended;
+      const nextParent = this.findFirstUnprocessedTaskParentFromLines(lines);
+      if (nextParent == null) return { changed: false, reason: "no-next", lines };
+      const started = this.startByParentIndexOnLines(lines, nextParent);
+      if (!started.changed) return started;
+      return { changed: true, lines };
+    });
+    if (!result?.changed) {
+      if (result?.reason === "not-found") new Notice("未完了の⌛が見つからないよ");
+      if (result?.reason === "no-next") new Notice("開始できる未処理タスクが見つからないよ");
+      return false;
+    }
+    this.refreshUnifiedView();
+    return true;
+  }
+
+  async uiTimePunch(ctx) {
+    if (!this.ensureMoment()) return false;
+    const targetFile = await this.resolveTargetLogFile(ctx);
+    if (!targetFile) {
+      new Notice("対象ログが見つからないよ");
+      return false;
+    }
+    const input = await this.promptTimePunchInput();
+    if (input == null) return false;
+
+    const timeStr = this.parseHHmmToHHmm(input);
+    if (!timeStr) {
+      new Notice("HHmmだけ受け付けるよ（例: 0930）");
+      return false;
+    }
+
+    const result = await this.withFileLines(targetFile, async (lines) => {
+      const snapshot = this.parseTaskchuteSnapshot(lines.join("\n"));
+      let parentLine = this.resolveNowParentLineFromSnapshot(snapshot);
+      if (parentLine == null) parentLine = this.findFirstTaskParentFromTopLines(lines);
+      if (parentLine == null) return { changed: false, reason: "no-parent", lines };
+
+      const hourglass = this.findLatestUnfinishedHourglassChildInLines(lines, parentLine);
+      if (!hourglass) {
+        const chosenStart = await this.promptTimePunchStartChoice(timeStr);
+        if (!chosenStart) return { changed: false, reason: "cancel", lines };
+        const childText = `  - ⌛ ${chosenStart}–  `;
+        lines.splice(parentLine + 1, 0, childText);
+        return { changed: true, lines };
+      }
+
+      const startTime = this.extractStartTimeFromHourglass(hourglass.text);
+      if (!startTime) return { changed: false, reason: "missing-start", lines };
+      const chosenEnd = await this.promptTimePunchStartChoice(timeStr);
+      if (!chosenEnd) return { changed: false, reason: "cancel", lines };
+      const minutes = this.diffMinutesHHMM(startTime, chosenEnd);
+      lines[hourglass.lineIndex] = `  - ✔️ ${startTime}–${chosenEnd} +${minutes}m`;
+      return { changed: true, lines };
+    });
+
+    if (!result?.changed) {
+      if (result?.reason === "no-parent") new Notice("対象の親タスクが見つからないよ");
+      return false;
+    }
+    this.refreshUnifiedView();
+    return true;
+  }
+
+  async uiAddTaskBelowNow(ctx) {
+    if (!this.ensureMoment()) return false;
+    const targetFile = await this.resolveTargetLogFile(ctx);
+    if (!targetFile) {
+      new Notice("対象ログが見つからないよ");
+      return false;
+    }
+    const timeStr = window.moment().format("HH:mm");
+    const result = await this.withFileLines(targetFile, (lines) => {
+      let insertLine = null;
+      if (ctx?.data?.now?.parentIndex != null) {
+        const nowParent = this.resolveParentLineIndexFromLines(lines, ctx.data.now.parentIndex);
+        if (nowParent != null) {
+          insertLine = this.findParentBlockBoundaryFromLines(lines, nowParent);
+        }
+      }
+
+      const tcId = this.generateTcId();
+      const parentText = `- 新規タスク <!-- tc:id=${tcId} -->`;
+      const childText = `  - ⌛ ${timeStr}–  `;
+
+      if (insertLine == null) {
+        lines.push(parentText);
+        lines.push(childText);
+      } else {
+        lines.splice(insertLine, 0, parentText, childText);
+      }
+      return { changed: true, lines };
+    });
+    if (!result?.changed) return false;
+    this.refreshUnifiedView();
+    return true;
   }
 
   sanitizeCockpitText(text) {
@@ -1969,10 +2586,33 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
   }
 
-  async runCockpitActionOnToday(action, label = "action") {
+  async confirmStartTaskUnified(title) {
+    return new Promise((resolve) => {
+      const menu = new Menu(this.app);
+      menu.addItem((i) => i.setTitle(`Start "${title}"?`).setDisabled(true));
+      menu.addItem((i) => i.setTitle("Start").onClick(() => resolve(true)));
+      menu.addItem((i) => i.setTitle("Cancel").onClick(() => resolve(false)));
+      menu.onHide(() => resolve(false));
+      menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+    });
+  }
+
+  async runCockpitActionOnToday(action, label = "action", options = {}) {
+    const allowOpen = options.allowOpen !== false;
     new Notice(`[TC] clicked: ${label}`);
     console.log("[TC] cockpit clicked:", label);
     if (!this.ensureMoment()) return;
+
+    if (!allowOpen) {
+      try {
+        await action();
+      } catch (e) {
+        console.error("[TC] cockpit error:", e);
+        new Notice("[TC] error: " + (e?.message ?? e));
+      }
+      return;
+    }
+
     const dateStr = window.moment().format("YYYY-MM-DD");
     const leaf = this.getPreferredMarkdownLeaf();
     if (!leaf) return void new Notice("Markdownエディタを開いてね");
@@ -2331,18 +2971,34 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     if (!source) return null;
     if (source.missing) {
       return {
+        activeFilePath: source.filePath,
         now: null,
         next: null,
         must: [],
         taskList: [],
         scheduled: [],
+        eta: null,
+        remainingMinutes: 0,
+        nowMemo: "",
         filePath: source.filePath,
         missing: true,
         dateStr: source.dateStr,
       };
     }
-    const parsed = this.parseCockpitContent(source.content);
-    return { ...parsed, filePath: source.filePath, missing: false, dateStr: source.dateStr };
+    let parsed;
+    if (this.settings.useNewParser) {
+      const snapshot = this.parseTaskchuteContent(source.content);
+      parsed = this.buildCockpitData(snapshot);
+    } else {
+      parsed = this.buildCockpitDataFromLegacy(this.parseCockpitContent(source.content));
+    }
+    return {
+      ...parsed,
+      activeFilePath: source.filePath,
+      filePath: source.filePath,
+      missing: false,
+      dateStr: source.dateStr,
+    };
   }
 
   async getCockpitContentSource() {
@@ -2474,6 +3130,67 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
     };
   }
 
+  parseTaskchuteContent(content) {
+    return this.parseTaskchuteSnapshot(content);
+  }
+
+  buildCockpitData(snapshot) {
+    const base = this.buildCockpitViewModelFromSnapshot(snapshot);
+    const remainingMinutes = this.computeRemainingMinutesFromSnapshot(snapshot);
+    const eta = this.buildEtaFromRemainingMinutes(remainingMinutes);
+    const nowMemo = this.extractNowMemoFromSnapshot(snapshot);
+    return { ...base, remainingMinutes, eta, nowMemo };
+  }
+
+  buildCockpitDataFromLegacy(parsed) {
+    return {
+      ...(parsed || { now: null, next: null, must: [], taskList: [], scheduled: [] }),
+      remainingMinutes: 0,
+      eta: null,
+      nowMemo: "",
+    };
+  }
+
+  computeRemainingMinutesFromSnapshot(snapshot) {
+    if (!snapshot?.tasks?.length) return 0;
+    const now = this.hasMoment() ? window.moment().format("HH:mm") : null;
+    let total = 0;
+    snapshot.tasks.forEach((task) => {
+      if (!task || task.status === "done") return;
+      const est = task.estimateMin || 0;
+      if (task.status === "running") {
+        const running = task.children?.find((c) => c.kind === "running" && !c.time?.end);
+        const start = running?.time?.start || null;
+        if (start && now) {
+          const elapsed = this.diffMinutesHHMM(start, now);
+          total += Math.max(0, est - elapsed);
+          return;
+        }
+      }
+      total += est;
+    });
+    return Math.max(0, total);
+  }
+
+  buildEtaFromRemainingMinutes(remainingMinutes) {
+    if (!remainingMinutes || !this.hasMoment()) return null;
+    const now = window.moment();
+    const eta = now.clone().add(remainingMinutes, "minutes");
+    const etaText = eta.format("HH:mm");
+    const dayDiff = eta.clone().startOf("day").diff(now.clone().startOf("day"), "days");
+    return dayDiff > 0 ? `${etaText} (+${dayDiff}d)` : etaText;
+  }
+
+  extractNowMemoFromSnapshot(snapshot) {
+    const idx = snapshot?.currentParentIndex;
+    if (typeof idx !== "number") return "";
+    const task = snapshot?.tasks?.[idx];
+    if (!task?.children?.length) return "";
+    const memo = [...task.children].reverse().find((c) => c.kind === "memo");
+    if (!memo?.raw) return "";
+    return String(memo.raw || "").replace(/^\s*-\s*📝\s*/, "").trim();
+  }
+
   parseTaskListFromContent(lines, nowParentIndex) {
     const items = [];
     for (let i = 0; i < lines.length; i++) {
@@ -2513,6 +3230,175 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       i = boundary - 1;
     }
     return items;
+  }
+
+  parseTaskchuteSnapshot(content) {
+    const lines = String(content || "").split(/\r?\n/);
+    const tasks = [];
+    let currentNowIndex = null;
+    let currentChildLineNo = null;
+    let lastDoneLineNo = null;
+    let lastDoneEndTime = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^\s*#{1,6}\s+/.test(line)) continue;
+      if (!/^-\s+/.test(line)) continue;
+
+      const meta = this.extractTaskListMeta(line);
+      const estimateMin = this.extractEstimateMinutesFromParentLine(line);
+      const tcId = this.extractTcId(line);
+      const children = [];
+
+      let j = i + 1;
+      for (; j < lines.length; j++) {
+        const next = lines[j];
+        if (/^\s*#{1,6}\s+/.test(next) || /^-\s+/.test(next)) break;
+        if (!/\S/.test(next)) continue;
+        const child = this.parseCockpitChildLine(next, j);
+        if (!child) continue;
+        children.push(child);
+        if (child.kind === "running" && !child.time?.end) {
+          currentNowIndex = tasks.length;
+          currentChildLineNo = child.lineNo;
+        }
+        if (child.kind === "done") {
+          lastDoneLineNo = child.lineNo;
+          lastDoneEndTime = child.time?.end || child.time?.start || lastDoneEndTime;
+        }
+      }
+
+      const latestExec = [...children].reverse().find((c) => c.kind === "running" || c.kind === "done");
+      const status = latestExec ? (latestExec.kind === "running" ? "running" : "done") : "ready";
+      tasks.push({
+        lineNo: i,
+        raw: line,
+        meta,
+        estimateMin,
+        tcId,
+        children,
+        status,
+        latestExec,
+      });
+      i = j - 1;
+    }
+
+    return {
+      tasks,
+      currentParentIndex: currentNowIndex,
+      currentChildLineNo,
+      isReady: currentNowIndex == null,
+      lastDoneLineNo,
+      lastDoneEndTime,
+      meta: { warnings: [] },
+    };
+  }
+
+  parseCockpitChildLine(text, lineNo) {
+    const trimmed = String(text || "").trim();
+    if (!trimmed.startsWith("-")) return null;
+    if (/^-\s+⌛/.test(trimmed)) {
+      const start = this.extractStartTimeFromHourglass(trimmed);
+      const endMatch = trimmed.match(/–\s*(\d{2}:\d{2})/);
+      return {
+        kind: "running",
+        lineNo,
+        raw: text,
+        time: { start: start || null, end: endMatch ? endMatch[1] : null },
+      };
+    }
+    if (/^-\s*✔️/.test(trimmed)) {
+      const start = this.extractStartTimeFromDone(trimmed);
+      const end = this.extractEndTimeFromDone(trimmed);
+      return {
+        kind: "done",
+        lineNo,
+        raw: text,
+        time: { start: start || null, end: end || null },
+      };
+    }
+    if (/^-\s+📝/.test(trimmed)) {
+      return { kind: "memo", lineNo, raw: text };
+    }
+    return { kind: "other", lineNo, raw: text };
+  }
+
+  buildCockpitViewModelFromSnapshot(snapshot) {
+    const tasks = snapshot.tasks || [];
+    const nowTask = typeof snapshot.currentParentIndex === "number" ? tasks[snapshot.currentParentIndex] : null;
+
+    const now = nowTask
+      ? {
+          title: nowTask.meta.title,
+          timeText: this.buildNowTimeTextFromTask(nowTask),
+          parentIndex: nowTask.lineNo,
+        }
+      : null;
+
+    let next = null;
+    for (const task of tasks) {
+      if (nowTask && task.lineNo === nowTask.lineNo) continue;
+      if (/^-\s+📝/.test(task.raw)) continue;
+      if (task.status === "done" || task.status === "running") continue;
+      next = task.raw;
+      break;
+    }
+
+    const must = [];
+    for (const task of tasks) {
+      if (this.isMustParentLine(task.raw)) {
+        must.push({ text: task.raw, done: task.status === "done" });
+      }
+      if (must.length >= 3) break;
+    }
+
+    const taskList = [];
+    for (const task of tasks) {
+      if (nowTask && task.lineNo === nowTask.lineNo) continue;
+      if (/^-\s+📝/.test(task.raw)) continue;
+      if (task.status === "done") continue;
+      taskList.push({
+        parentLine: task.lineNo,
+        title: task.meta.title,
+        estimateText: task.meta.estimateText,
+        links: task.meta.links,
+        isNow: task.status === "running",
+      });
+    }
+
+    const scheduled = [];
+    for (const task of tasks) {
+      if (!/^-\s+/.test(task.raw)) continue;
+      if (!/^-\s*(?:★\s*)?\d{2}:\d{2}\b/.test(task.raw)) continue;
+      if (task.status === "done") continue;
+      scheduled.push(task.raw);
+    }
+
+    return {
+      now,
+      next,
+      must,
+      taskList,
+      scheduled,
+    };
+  }
+
+  buildNowTimeTextFromTask(task) {
+    if (!task || !Array.isArray(task.children)) return "";
+    const runningChild = [...task.children]
+      .reverse()
+      .find((c) => c.kind === "running" && !c.time?.end);
+    if (!runningChild) return "";
+    const start = runningChild.time?.start;
+    const estimate = task.estimateMin;
+    if (start && estimate && this.hasMoment()) {
+      const now = window.moment().format("HH:mm");
+      const elapsed = this.diffMinutesHHMM(start, now);
+      const eta = this.addMinutesHHMM(start, estimate);
+      return eta ? `${start} +${elapsed}m → ${eta}` : `${start} +${elapsed}m`;
+    }
+    if (start) return `${start}`;
+    return "";
   }
 
   findLatestExecChildInLines(lines, parentLine, boundary) {
@@ -3648,22 +4534,24 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // =================================================
   // End（stateなし運用：同ファイルをスキャンして未完了⌛を終了）
   // =================================================
-  async endTask() {
+  async endTask(options = {}) {
     if (!this.ensureMoment()) return;
-    if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     const targetFile = await this.resolveFileForFallback();
     if (!targetFile) {
       new Notice("対象ログが見つからないよ");
       return;
     }
 
-    try {
-      const leaf = this.getPreferredMarkdownLeaf();
-      if (!leaf) return void new Notice("Markdownエディタが見つからなかったよ");
-      await leaf.openFile(targetFile, { active: true });
-    } catch (err) {
-      console.error("[TaskChute] Failed to open log:", targetFile?.path, err);
-      return void new Notice("ログを開けなかったよ");
+    const allowOpen = options.allowOpen !== false;
+    if (allowOpen) {
+      try {
+        const leaf = this.getPreferredMarkdownLeaf();
+        if (!leaf) return void new Notice("Markdownエディタが見つからなかったよ");
+        await leaf.openFile(targetFile, { active: true });
+      } catch (err) {
+        console.error("[TaskChute] Failed to open log:", targetFile?.path, err);
+        return void new Notice("ログを開けなかったよ");
+      }
     }
 
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -3702,7 +4590,7 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
   // =================================================
   // End at Estimate（見積で締める）
   // =================================================
-  async endTaskAtEstimate() {
+  async endTaskAtEstimate(options = {}) {
     if (!this.ensureMoment()) return;
     if (!this.isTaskchuteLogActive()) return void new Notice("taskchuteログを開いてね");
     let view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -3713,13 +4601,16 @@ module.exports = class TaskChuteMinPlugin extends Plugin {
       const targetFile = await this.resolveFileForFallback();
       if (!targetFile) return void new Notice("対象ログが見つからないよ");
 
-      try {
-        const leaf = this.getPreferredMarkdownLeaf();
-        if (!leaf) return void new Notice("Markdownエディタが見つからなかったよ");
-        await leaf.openFile(targetFile, { active: true });
-      } catch (err) {
-        console.error("[TaskChute] Failed to open log:", targetFile?.path, err);
-        return void new Notice("ログを開けなかったよ");
+      const allowOpen = options.allowOpen !== false;
+      if (allowOpen) {
+        try {
+          const leaf = this.getPreferredMarkdownLeaf();
+          if (!leaf) return void new Notice("Markdownエディタが見つからなかったよ");
+          await leaf.openFile(targetFile, { active: true });
+        } catch (err) {
+          console.error("[TaskChute] Failed to open log:", targetFile?.path, err);
+          return void new Notice("ログを開けなかったよ");
+        }
       }
       view = this.app.workspace.getActiveViewOfType(MarkdownView);
       editor = view?.editor;
@@ -5253,6 +6144,18 @@ class TaskChuteSettingTab extends PluginSettingTab {
         this.display();
       });
     });
+
+    new Setting(containerEl)
+      .setName("Use new Cockpit parser")
+      .setDesc("Use the shared parser snapshot for Cockpit data (toggle to fall back).")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.useNewParser);
+        toggle.onChange(async (value) => {
+          this.plugin.settings.useNewParser = value;
+          await this.plugin.saveSettings();
+          this.plugin.refreshCockpitView();
+        });
+      });
 
     const helpBlock = containerEl.createEl("div", { cls: "tc-help-block" });
     helpBlock.createEl("p", { text: "迷ったらヘルプを開いてください。" });

@@ -67,6 +67,10 @@ See [USAGE.md](USAGE.md) for practical usage.
 - モバイル多段ツールバー（タップ最短）
 - Focus / Filter / Dim 表示モード
 - テンプレ（フォルダ指定・セクション挿入・前日コピー）
+- Cockpit / Chute フルページビュー（同一UI/同一ロジック）
+- Chute Mode はログ未オープンでも操作可能
+- Multiple ⌛（Now）検知と修復フロー
+- Techo（月次）から今日分をインポート
 
 ---
 
@@ -77,6 +81,7 @@ See [USAGE.md](USAGE.md) for practical usage.
 - Enable templates / Focus / Filter / Dim / Player / Mobile toolbar
 - Player placement / Player size / Horizon size / Size ranges
 - Player 表示（初期ビュー / ≡挙動 / Grid割当）
+- Techo folder path / Techo import header / Techo import mode
 
 ---
 
@@ -86,6 +91,7 @@ See [USAGE.md](USAGE.md) for practical usage.
 - TaskChute: Open Today
 - TaskChute: Open Previous Day
 - TaskChute: Open Next Day
+- TaskChute: Open Chute View (Full Page)
 
 ### 実行フロー
 - TaskChute: Start
@@ -118,6 +124,7 @@ See [USAGE.md](USAGE.md) for practical usage.
 
 ### その他
 - TaskChute: Recalculate Duration (+Xm)
+- TaskChute: Import Techo Today
 
 ---
 

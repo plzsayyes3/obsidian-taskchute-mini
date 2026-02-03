@@ -30,6 +30,7 @@ TaskChute Mini は、
 - コマンド  
   TaskChute: Open Today
 - Player Mode の Today ボタン
+- Chute View から自動で対象ログを読込
 
 logFolderPath/YYYY-MM-DD.md が開きます  
 （存在しない場合は自動で作成されます）
@@ -93,6 +94,29 @@ logFolderPath/YYYY-MM-DD.md が開きます
 
 ---
 
+## Chute View（フルページ）
+
+Chute View は、**ログを開かずに操作できる**フルページUIです。
+
+### 開き方
+
+- TaskChute: Open Chute View (Full Page)
+
+### できること
+
+- Start / End / End & Start / Time / Add
+- タスクリストをタップして開始（Ready のときのみ）
+- Multiple ⌛ の検知と修復
+
+### Start の挙動
+
+- Now がある時：開始不可（Notice）
+- Ready の時：
+  - タスクリストをタップ → 確認 → 開始
+  - Start ボタン → 「上から開始」確認 → 開始
+
+---
+
 ## ログの基本ルール
 
 ### 親タスク
@@ -138,6 +162,26 @@ logFolderPath/YYYY-MM-DD.md が開きます
 - Focus / Filter の切り替え
 
 考えずに押せる操作だけを集めています。
+
+---
+
+## Techo（月次）から今日分をインポート
+
+### コマンド
+
+- TaskChute: Import Techo Today
+
+### 事前設定
+
+- Techo folder path（`YYYY-MM.md` が入っているフォルダ）
+- Techo import header（追加する見出し）
+- Techo import mode（Append / Replace）
+
+### 挙動
+
+- 今日の日付に対応する `## M月D日(...)` の配下から `- ` を抽出
+- TaskChute ログの `## techoからインポート` 配下へ追加
+- 2回以上実行しても同一行は増殖しない（append）
 
 ---
 

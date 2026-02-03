@@ -468,6 +468,13 @@
   background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary));
 }
 
+.taskchute-cockpit-view .tc-cp-btn.is-disabled,
+.taskchute-cockpit-view .tc-cp-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .taskchute-cockpit-view .tc-cockpit-now input {
   width: 100%;
   font-size: 16px;

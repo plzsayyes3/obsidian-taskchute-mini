@@ -9,7 +9,7 @@
 
 const { ItemView, Notice } = require("obsidian");
 
-const VIEW_TYPE = "taskchute-chute-mode";
+const VIEW_TYPE = "taskchute-chute-view";
 
 // ---- small utils ----
 function escapeRegExp(text) {
@@ -436,6 +436,255 @@ class ChuteModeView extends ItemView {
   }
 }
 
+// =================================================
+// Full Page Chute View (vault read/modify only)
+// =================================================
+const ChuteModeViewFull = class extends ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.memoDraft = "";
+    this._rendering = false;
+  }
+
+  getViewType() { return VIEW_TYPE; }
+  getDisplayText() { return "Chute View"; }
+  getIcon() { return "layout-dashboard"; }
+
+  async onOpen() {
+    this.containerEl.empty();
+    this.containerEl.addClass("taskchute-chute-mode-view");
+
+    await this.plugin.resolveFileForFallback();
+
+    this.rootEl = this.containerEl.createDiv({ cls: "tc-chute-root" });
+    this.buildSkeleton();
+    await this.render();
+  }
+
+  buildSkeleton() {
+    this.rootEl.empty();
+
+    const header = this.rootEl.createDiv({ cls: "tc-chute-header" });
+    this.timeEl = header.createDiv({ cls: "tc-chute-time", text: "--:--" });
+    this.dateEl = header.createDiv({ cls: "tc-chute-date", text: "----/--/--" });
+
+    const top = this.rootEl.createDiv({ cls: "tc-chute-top" });
+    const ribbonBox = top.createDiv({ cls: "tc-chute-box" });
+    ribbonBox.createDiv({ cls: "tc-chute-title", text: "PROGRESS" });
+    this.ribbonEl = ribbonBox.createDiv({ cls: "tc-chute-ribbon" });
+
+    const summaryBox = top.createDiv({ cls: "tc-chute-box" });
+    summaryBox.createDiv({ cls: "tc-chute-title", text: "TODAY" });
+    this.summaryEl = summaryBox.createDiv({ cls: "tc-chute-summary" });
+
+    const nowBox = this.rootEl.createDiv({ cls: "tc-chute-box tc-chute-now" });
+    nowBox.createDiv({ cls: "tc-chute-title", text: "NOW" });
+    this.nowEl = nowBox.createDiv({ cls: "tc-chute-now-title", text: "READY" });
+    this.nowMetaEl = nowBox.createDiv({ cls: "tc-chute-now-meta", text: "" });
+    this.nowWarnEl = nowBox.createDiv({ cls: "tc-chute-now-warn" });
+    this.memoEl = nowBox.createEl("textarea", {
+      cls: "tc-chute-memo",
+      attr: { placeholder: "ひとことメモ" },
+    });
+
+    const actions = nowBox.createDiv({ cls: "tc-chute-actions" });
+    this.btnStart = actions.createEl("button", { cls: "tc-chute-btn", text: "▶ Start" });
+    this.btnEnd = actions.createEl("button", { cls: "tc-chute-btn", text: "■ End" });
+    this.btnEas = actions.createEl("button", { cls: "tc-chute-btn", text: "⏭ E&S" });
+    this.btnTime = actions.createEl("button", { cls: "tc-chute-btn", text: "⏱ Time" });
+    this.btnAdd = actions.createEl("button", { cls: "tc-chute-btn", text: "＋ Add" });
+    this.btnRepair = actions.createEl("button", { cls: "tc-chute-btn", text: "修復する" });
+
+    const listWrap = this.rootEl.createDiv({ cls: "tc-chute-bottom" });
+    const taskBox = listWrap.createDiv({ cls: "tc-chute-box tc-chute-tasklist" });
+    taskBox.createDiv({ cls: "tc-chute-title", text: "TASK LIST" });
+    this.taskListEl = taskBox.createDiv({ cls: "tc-chute-list" });
+
+    const schedBox = listWrap.createDiv({ cls: "tc-chute-box tc-chute-scheduled" });
+    schedBox.createDiv({ cls: "tc-chute-title", text: "SCHEDULED" });
+    this.scheduledEl = schedBox.createDiv({ cls: "tc-chute-list" });
+
+    this.bindEvents();
+  }
+
+  bindEvents() {
+    this.memoEl.addEventListener("keydown", async (ev) => {
+      if (ev.key === "Escape") {
+        this.memoEl.value = "";
+        this.memoDraft = "";
+        ev.preventDefault();
+        return;
+      }
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        const text = this.memoEl.value.trim();
+        if (!text) return;
+        const data = await this.plugin.getCockpitData();
+        const ok = await this.plugin.cockpitAddMemo(data?.activeFilePath || "", data?.now?.parentIndex ?? null, text);
+        if (ok) {
+          this.memoEl.value = "";
+          this.memoDraft = "";
+          await this.render();
+        }
+      }
+    });
+
+    this.btnStart.addEventListener("click", async () => {
+      const data = await this.plugin.getCockpitData();
+      if (data?.nowAnomaly) return;
+      if (data?.now) {
+        new Notice("Now があるため開始できません。先に End してください");
+        return;
+      }
+      const topItem = data?.taskList?.[0];
+      if (!topItem) return new Notice("開始できるタスクが見つからないよ");
+      const ok = await this.plugin.confirmWithMessage("上から実行しますか？");
+      if (!ok) return;
+      await this.plugin.uiStartByParentIndex({ source: "view", file: this.plugin.getTFileByPath(data.activeFilePath), data }, topItem.parentLine, { title: topItem.title, taskIndex: 0 });
+      await this.render();
+    });
+
+    this.btnEnd.addEventListener("click", async () => {
+      const data = await this.plugin.getCockpitData();
+      if (data?.nowAnomaly) return;
+      await this.plugin.uiEnd({ source: "view", file: this.plugin.getTFileByPath(data.activeFilePath), data });
+      await this.render();
+    });
+
+    this.btnEas.addEventListener("click", async () => {
+      const data = await this.plugin.getCockpitData();
+      if (data?.nowAnomaly) return;
+      await this.plugin.uiEndAndStart({ source: "view", file: this.plugin.getTFileByPath(data.activeFilePath), data });
+      await this.render();
+    });
+
+    this.btnTime.addEventListener("click", async () => {
+      const data = await this.plugin.getCockpitData();
+      if (data?.nowAnomaly) return;
+      await this.plugin.uiTimePunch({ source: "view", file: this.plugin.getTFileByPath(data.activeFilePath), data });
+      await this.render();
+    });
+
+    this.btnAdd.addEventListener("click", async () => {
+      const data = await this.plugin.getCockpitData();
+      if (data?.nowAnomaly) return;
+      await this.plugin.uiAddTaskBelowNow({ source: "view", file: this.plugin.getTFileByPath(data.activeFilePath), data });
+      await this.render();
+    });
+
+    this.btnRepair.addEventListener("click", async () => {
+      const data = await this.plugin.getCockpitData();
+      await this.plugin.uiRepairMultipleNow({ source: "view", file: this.plugin.getTFileByPath(data.activeFilePath), data });
+      await this.render();
+    });
+  }
+
+  async render() {
+    if (this._rendering) return;
+    this._rendering = true;
+    const data = await this.plugin.getCockpitData();
+
+    const now = window.moment ? window.moment() : null;
+    this.timeEl.textContent = now ? now.format("HH:mm") : "--:--";
+    this.dateEl.textContent = now ? now.format("YYYY-MM-DD") : "----/--/--";
+
+    this.summaryEl.empty();
+    const rem = data?.remainingMinutes || 0;
+    const eta = data?.eta || "--:--";
+    this.summaryEl.createDiv({ text: `残り: ${rem}m` });
+    this.summaryEl.createDiv({ text: `ETA: ${eta}` });
+
+    this.nowWarnEl.textContent = "";
+    if (data?.nowAnomaly) {
+      this.nowEl.textContent = "⚠ MULTIPLE NOW";
+      this.nowMetaEl.textContent = (data.runningNowList || []).map((t) => t.title).join(" / ");
+      this.nowWarnEl.textContent = "修復が必要です";
+    } else if (data?.now) {
+      this.nowEl.textContent = data.now.title || "";
+      this.nowMetaEl.textContent = data.now.timeText || "";
+    } else {
+      this.nowEl.textContent = "READY";
+      this.nowMetaEl.textContent = "";
+    }
+
+    const memoValue = this.memoDraft || data?.nowMemo || "";
+    if (this.memoEl.value !== memoValue) this.memoEl.value = memoValue;
+
+    const disable = !!data?.nowAnomaly;
+    [this.btnStart, this.btnEnd, this.btnEas, this.btnTime, this.btnAdd].forEach((b) => {
+      b.toggleClass("is-disabled", disable);
+      if (disable) b.setAttribute("disabled", "true");
+      else b.removeAttribute("disabled");
+    });
+    if (disable) {
+      this.btnRepair.removeAttribute("disabled");
+      this.btnRepair.removeClass("is-disabled");
+    } else {
+      this.btnRepair.setAttribute("disabled", "true");
+      this.btnRepair.addClass("is-disabled");
+    }
+
+    this.taskListEl.empty();
+    const tasks = data?.taskList || [];
+    if (!tasks.length) {
+      this.taskListEl.createDiv({ text: "—", cls: "tc-chute-empty" });
+    } else {
+      tasks.forEach((item, idx) => {
+        const row = this.taskListEl.createDiv({ cls: "tc-chute-task" });
+        row.createDiv({ cls: "tc-chute-task-title", text: item.title || "—" });
+        const meta = row.createDiv({ cls: "tc-chute-task-meta" });
+        if (item.estimateText) meta.createSpan({ text: item.estimateText });
+        if (item.links?.length) {
+          item.links.forEach((link) => {
+            const a = meta.createEl("a", { text: link.label || "link", cls: "tc-chute-link" });
+            a.setAttribute("href", "#");
+            a.addEventListener("click", (ev) => {
+              ev.preventDefault();
+              ev.stopPropagation();
+              this.plugin.openCockpitLink(link, data.activeFilePath || "");
+            });
+          });
+        }
+        row.addEventListener("click", async () => {
+          const latest = await this.plugin.getCockpitData();
+          if (latest?.now) {
+            new Notice("Now があるため開始できません。先に End してください");
+            return;
+          }
+          const ok = await this.plugin.confirmWithMessage("このタスクを開始しますか？");
+          if (!ok) return;
+          await this.plugin.uiStartByParentIndex({ source: "view", file: this.plugin.getTFileByPath(latest.activeFilePath), data: latest }, item.parentLine, { title: item.title, taskIndex: idx });
+          await this.render();
+        });
+      });
+    }
+
+    this.scheduledEl.empty();
+    const sched = data?.scheduled || [];
+    if (!sched.length) {
+      this.scheduledEl.createDiv({ text: "—", cls: "tc-chute-empty" });
+    } else {
+      sched.forEach((t) => {
+        const row = this.scheduledEl.createDiv({ cls: "tc-chute-task" });
+        row.createDiv({ cls: "tc-chute-task-title", text: t });
+      });
+    }
+
+    this.ribbonEl.empty();
+    if (tasks.length) {
+      tasks.forEach((t) => {
+        const chip = this.ribbonEl.createDiv({ cls: "tc-chute-chip" });
+        chip.createDiv({ cls: "tc-chute-chip-title", text: t.title || "—" });
+      });
+    } else {
+      this.ribbonEl.createDiv({ text: "—", cls: "tc-chute-empty" });
+    }
+
+    this._rendering = false;
+  }
+};
+
 function registerChuteModeView(plugin) {
   // 1) Register view
   plugin.registerView(VIEW_TYPE, (leaf) => new ChuteModeView(leaf, plugin));
@@ -455,5 +704,5 @@ function registerChuteModeView(plugin) {
 
 module.exports = {
   VIEW_TYPE,
-  registerChuteModeView,
+  ChuteModeView: ChuteModeViewFull,
 };

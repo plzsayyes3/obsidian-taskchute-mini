@@ -34,10 +34,7 @@
     "openNextDay",
     "toggleFocus"
   ],
-  "activeSettingsTab": "general",
+  "activeSettingsTab": "display",
   "settingsVersion": 1,
-  "useNewParser": true,
-  "techoFolderPath": "02_techo",
-  "techoImportHeader": "## techoからインポート",
-  "techoImportMode": "append"
+  "useNewParser": true
 }

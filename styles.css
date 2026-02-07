@@ -3,6 +3,31 @@
 .taskchute-focus .cm-line.taskchute-focus-hide {
   display: none;
 }
+
+.tc-done-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.8em;
+  line-height: 1.4;
+  white-space: nowrap;
+
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.tc-done-parent-dim {
+  opacity: 0.32;
+}
+
+.tc-now-parent.tc-done-parent-dim {
+  opacity: 1;
+}
 /* =========================
    TaskChute Music Player Mode (Light-friendly)
    ========================= */

@@ -36,5 +36,8 @@
   ],
   "activeSettingsTab": "display",
   "settingsVersion": 1,
-  "useNewParser": true
+  "useNewParser": true,
+  "techoFolderPath": "",
+  "techoImportHeader": "## techoからインポート",
+  "techoImportMode": "append"
 }

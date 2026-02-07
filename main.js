@@ -44,8 +44,9 @@ const {
 } = require("obsidian");
 
 // Focus Mode（CodeMirror6 行デコレーション用）
-const { ViewPlugin, Decoration } = require("@codemirror/view");
-const { RangeSetBuilder } = require("@codemirror/state");
+const { ViewPlugin, Decoration, WidgetType } = require("@codemirror/view");
+const { RangeSetBuilder, StateEffect } = require("@codemirror/state");
+const { foldEffect, unfoldEffect, foldState } = require("@codemirror/language");
 
 const DEFAULT_SETTINGS = {
   logFolderPath: "taskchute",
@@ -611,6 +612,7 @@ this.register(() => {
 
     this.focusMode = false;
     this.filterMode = false;
+    this.filterFoldOverrides = new Set();
     this.isTaskchuteActiveFlag = false;
 
     // Player Mode: 表示条件を監視（アクティブファイル / キーボード開閉）
@@ -728,6 +730,12 @@ this.addCommand({
       name: "TaskChute: Toggle Filter Mode",
       icon: "filter",
       callback: () => this.toggleFilterMode(),
+    });
+    this.addCommand({
+      id: "taskchute-toggle-filter-done-fold",
+      name: "TaskChute: Toggle done fold for current parent",
+      icon: "chevrons-down-up",
+      callback: () => this.toggleFilterDoneFoldForCurrentParent(),
     });
 
     this.addCommand({
@@ -4549,6 +4557,67 @@ async openChuteMode() {
     await this.saveSettings();
   }
 
+  getActiveCM6View(editor) {
+    if (!editor) return null;
+    const cm = editor.cm || editor.cmEditor || editor.cmView;
+    const view = cm?.view || cm;
+    return view && typeof view.dispatch === "function" ? view : null;
+  }
+
+  toggleFilterDoneFoldForCurrentParent() {
+    if (!this.filterMode || this.focusMode) {
+      new Notice("Filter Mode が有効な時のみ使用できます");
+      return;
+    }
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const editor = view?.editor;
+    if (!editor) return void new Notice("Markdownエディタを開いてね");
+    if (view.file && !this.isTaskchuteLogPath(view.file.path)) {
+      return void new Notice("taskchuteログを開いてね");
+    }
+
+    const cursor = editor.getCursor();
+    const parentLine = this.findParentLineIndex(editor, cursor.line);
+    if (parentLine === null) return void new Notice("親行にカーソルを置いてね");
+
+    const boundary = this.findParentBlockBoundary(editor, parentLine);
+    if (boundary <= parentLine + 1) return;
+
+    const cmView = this.getActiveCM6View(editor);
+    if (!cmView) return void new Notice("CM6 view が見つからなかったよ");
+
+    const startLineNo = parentLine + 2;
+    const endLineNo = boundary;
+    const doc = cmView.state.doc;
+    if (startLineNo > doc.lines || endLineNo > doc.lines) return;
+
+    const from = doc.line(startLineNo).from;
+    const to = doc.line(endLineNo).to;
+    if (from >= to) return;
+
+    const parentLineNo = parentLine + 1;
+    let isFolded = false;
+    try {
+      const folds = foldState(cmView.state);
+      if (folds) {
+        const iter = folds.iter(from, to);
+        if (iter.value) isFolded = true;
+      }
+    } catch (_) {
+      isFolded = false;
+    }
+    const shouldUnfold = isFolded;
+    if (shouldUnfold) {
+      this.filterFoldOverrides.add(parentLineNo);
+    } else {
+      this.filterFoldOverrides.delete(parentLineNo);
+    }
+
+    const effect = shouldUnfold ? unfoldEffect.of({ from, to }) : foldEffect.of({ from, to });
+    cmView.dispatch({ effects: [effect] });
+    this.refreshAllMarkdownEditors();
+  }
+
   refreshAllMarkdownEditors() {
     const leaves = this.app.workspace.getLeavesOfType("markdown");
     for (const leaf of leaves) {
@@ -4678,21 +4747,71 @@ async openChuteMode() {
   buildFilterModeExtension() {
     const plugin = this;
 
-    const hideLine = Decoration.line({
-      attributes: { class: "taskchute-filter-hide" },
+    const dimLine = Decoration.line({
+      attributes: { class: "tc-done-parent-dim" },
     });
+
+    class DoneTimeBadgeWidget extends WidgetType {
+      constructor(text) {
+        super();
+        this.text = text;
+      }
+      eq(other) {
+        return other.text === this.text;
+      }
+      toDOM() {
+        const span = document.createElement("span");
+        span.className = "tc-done-badge";
+        span.setAttribute("aria-label", "done time");
+        span.textContent = this.text;
+        return span;
+      }
+      ignoreEvent() {
+        return true;
+      }
+    }
 
     function isParentTask(text) {
       if (/^\s*#{1,6}\s+/.test(text)) return false;
       return /^-\s+/.test(text);
     }
 
-    function hasDoneChild(doc, parentLineNo, boundaryLineNo) {
+    function scanParentBlock(doc, parentLineNo, boundaryLineNo) {
+      let hasDone = false;
+      let hasActiveHourglass = false;
+      let latestDoneTime = "";
       for (let i = parentLineNo + 1; i < boundaryLineNo; i++) {
         const t = doc.line(i).text;
-        if (/^\s+-\s*✔️/.test(t)) return true;
+        if (plugin.isHourglassLine(t) && !plugin.hasEndTimeOnHourglass(t)) {
+          hasActiveHourglass = true;
+        }
+        if (/^\s+-\s*✔️/.test(t)) {
+          hasDone = true;
+          const m = t.match(/✔️\s*(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/);
+          if (m) {
+            latestDoneTime = `${m[1]}–${m[2]}`;
+          }
+        }
       }
-      return false;
+      return { hasDone, hasActiveHourglass, latestDoneTime };
+    }
+
+    function findNowParentLineNo(doc) {
+      let latestHourglassLineNo = -1;
+      for (let i = 1; i <= doc.lines; i++) {
+        const t = doc.line(i).text;
+        if (plugin.isHourglassLine(t) && !plugin.hasEndTimeOnHourglass(t)) {
+          latestHourglassLineNo = i;
+        }
+      }
+      if (latestHourglassLineNo < 1) return null;
+
+      for (let i = latestHourglassLineNo - 1; i >= 1; i--) {
+        const t = doc.line(i).text;
+        if (/^\s*#{1,6}\s+/.test(t)) break;
+        if (/^-\s+/.test(t)) return i;
+      }
+      return null;
     }
 
     function findParentBlockBoundary(doc, parentLineNo) {
@@ -4705,46 +4824,82 @@ async openChuteMode() {
     }
 
     function build(view) {
-      if (!plugin.filterMode) return Decoration.none;
+      if (!plugin.filterMode || plugin.focusMode) {
+        return { decorations: Decoration.none, folds: [] };
+      }
 
-      const hiddenLines = new Set();
       const doc = view.state.doc;
+      const nowParentLineNo = findNowParentLineNo(doc);
+      const folds = [];
+      const b = new RangeSetBuilder();
 
       for (let i = 1; i <= doc.lines; i++) {
         const t = doc.line(i).text;
         if (!isParentTask(t)) continue;
 
         const boundary = findParentBlockBoundary(doc, i);
-        if (hasDoneChild(doc, i, boundary)) {
-          for (let j = i; j < boundary; j++) hiddenLines.add(j);
+        const scan = scanParentBlock(doc, i, boundary);
+        if (scan.hasDone && !scan.hasActiveHourglass) {
+          const line = doc.line(i);
+          if (nowParentLineNo !== i) {
+            b.add(line.from, line.from, dimLine);
+          }
+          if (scan.latestDoneTime) {
+            b.add(
+              line.to,
+              line.to,
+              Decoration.widget({
+                widget: new DoneTimeBadgeWidget(scan.latestDoneTime),
+                side: 1,
+              })
+            );
+          }
+          if (boundary > i + 1 && !plugin.filterFoldOverrides?.has(i)) {
+            const startLine = doc.line(i + 1);
+            const endLine = doc.line(boundary - 1);
+            const from = startLine.from;
+            const to = endLine.to;
+            if (from < to) folds.push({ from, to });
+          }
         }
         i = boundary - 1;
       }
 
-      const b = new RangeSetBuilder();
-
-      for (const r of view.visibleRanges) {
-        let pos = r.from;
-        while (pos <= r.to) {
-          const line = doc.lineAt(pos);
-          if (hiddenLines.has(line.number)) {
-            b.add(line.from, line.from, hideLine);
-          }
-          pos = line.to + 1;
-        }
-      }
-
-      return b.finish();
+      return { decorations: b.finish(), folds };
     }
 
     return ViewPlugin.fromClass(
       class {
         constructor(view) {
-          this.decorations = build(view);
+          const result = build(view);
+          this.decorations = result.decorations;
+          this.foldedRanges = [];
+          this.applyFolds(view, result.folds);
+        }
+        applyFolds(view, nextFolds) {
+          const prevKeys = new Set(this.foldedRanges.map((r) => `${r.from}:${r.to}`));
+          const nextKeys = new Set(nextFolds.map((r) => `${r.from}:${r.to}`));
+          const effects = [];
+
+          this.foldedRanges.forEach((r) => {
+            const key = `${r.from}:${r.to}`;
+            if (!nextKeys.has(key)) effects.push(unfoldEffect.of(r));
+          });
+          nextFolds.forEach((r) => {
+            const key = `${r.from}:${r.to}`;
+            if (!prevKeys.has(key)) effects.push(foldEffect.of(r));
+          });
+
+          this.foldedRanges = nextFolds;
+          if (effects.length > 0) {
+            view.dispatch({ effects });
+          }
         }
         update(update) {
           if (update.docChanged || update.viewportChanged || update.transactions.length) {
-            this.decorations = build(update.view);
+            const result = build(update.view);
+            this.decorations = result.decorations;
+            this.applyFolds(update.view, result.folds);
           }
         }
       },
